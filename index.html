@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7f5">
+    <title>Haven — Rental management</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="Haven home">
+        <span class="brand-mark">H</span>
+        <span>haven<span class="brand-period">.</span></span>
+      </a>
+      <p class="side-label">WORKSPACE</p>
+      <nav aria-label="Main navigation">
+        <a class="nav-link active" href="#dashboard" data-view="dashboard"><span>⌂</span> Overview</a>
+        <a class="nav-link" href="#properties" data-view="properties"><span>▦</span> Properties</a>
+        <a class="nav-link" href="#tenancies" data-view="tenancies"><span>♙</span> Tenancies</a>
+        <a class="nav-link" href="#payments" data-view="payments"><span>＄</span> Rent &amp; payments</a>
+        <a class="nav-link" href="#maintenance" data-view="maintenance"><span>⚒</span> Maintenance</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="profile-avatar">JD</div>
+        <div><strong>Jordan Davis</strong><small>Property owner</small></div>
+        <span class="profile-menu" aria-hidden="true">···</span>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-mark">H</span> haven<span class="brand-period">.</span></div>
+        <div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb-current">Overview</strong></div>
+        <div class="topbar-right">
+          <span class="today" id="today-label"></span>
+          <button class="icon-button" id="notifications-button" type="button" aria-label="View notifications">♧<i></i></button>
+        </div>
+      </header>
+
+      <section class="view active" id="dashboard-view">
+        <div class="page-heading">
+          <div><p class="eyebrow">YOUR RENTAL PORTFOLIO</p><h1><span id="greeting-time">Good morning</span>, Jordan <span>✦</span></h1><p class="subheading">Here’s what’s happening with your properties.</p></div>
+          <button class="button button-primary" type="button" data-open-dialog="tenancy-dialog">＋ Add tenancy</button>
+        </div>
+        <div class="stats-grid" id="dashboard-stats"></div>
+        <div class="dashboard-grid">
+          <article class="card rent-card">
+            <div class="card-heading"><div><p class="eyebrow">THIS MONTH</p><h2>Rent collection</h2></div><a href="#payments" data-view="payments">View payments <span>↗</span></a></div>
+            <div class="collection-summary"><strong id="rent-collected"></strong><span id="rent-total"></span></div>
+            <div class="progress-track"><div id="rent-progress"></div></div>
+            <div class="collection-legend"><span><i class="legend-dot green"></i>Collected</span><span><i class="legend-dot amber"></i>Pending</span><span id="rent-rate"></span></div>
+            <div class="rent-list" id="rent-list"></div>
+          </article>
+          <article class="card activity-card">
+            <div class="card-heading"><div><p class="eyebrow">NEEDS YOUR ATTENTION</p><h2>Open maintenance</h2></div><a href="#maintenance" data-view="maintenance">View all <span>↗</span></a></div>
+            <div id="attention-list"></div>
+          </article>
+        </div>
+        <article class="card properties-card">
+          <div class="card-heading"><div><p class="eyebrow">YOUR PORTFOLIO</p><h2>Properties</h2></div><a href="#properties" data-view="properties">All properties <span>↗</span></a></div>
+          <div class="property-grid" id="dashboard-properties"></div>
+        </article>
+      </section>
+
+      <section class="view" id="properties-view">
+        <div class="page-heading"><div><p class="eyebrow">YOUR PORTFOLIO</p><h1>Properties</h1><p class="subheading">Manage the homes in your rental portfolio.</p></div><button class="button button-primary" type="button" data-open-dialog="property-dialog">＋ Add property</button></div>
+        <div class="section-summary" id="properties-summary"></div>
+        <div class="table-card"><table><thead><tr><th>PROPERTY</th><th>ADDRESS</th><th>UNITS</th><th>OCCUPANCY</th><th>MONTHLY RENT</th></tr></thead><tbody id="properties-table"></tbody></table><div class="empty-state hidden" id="properties-empty">No properties yet. Add your first property to get started.</div></div>
+      </section>
+
+      <section class="view" id="tenancies-view">
+        <div class="page-heading"><div><p class="eyebrow">PEOPLE &amp; LEASES</p><h1>Tenancies</h1><p class="subheading">Keep tenant details and lease terms in one place.</p></div><button class="button button-primary" type="button" data-open-dialog="tenancy-dialog">＋ Add tenancy</button></div>
+        <div class="section-summary" id="tenancies-summary"></div>
+        <div class="table-card"><table><thead><tr><th>TENANT</th><th>PROPERTY</th><th>LEASE PERIOD</th><th>MONTHLY RENT</th><th>STATUS</th></tr></thead><tbody id="tenancies-table"></tbody></table><div class="empty-state hidden" id="tenancies-empty">No tenancies yet. Add a tenancy to connect a tenant with a property.</div></div>
+      </section>
+
+      <section class="view" id="payments-view">
+        <div class="page-heading"><div><p class="eyebrow">RENT TRACKING</p><h1>Rent &amp; payments</h1><p class="subheading">Track rent due and record payments from tenants.</p></div><button class="button button-primary" type="button" data-open-dialog="payment-dialog">＋ Record payment</button></div>
+        <div class="section-summary" id="payments-summary"></div>
+        <div class="table-card"><table><thead><tr><th>TENANT</th><th>PROPERTY</th><th>PAYMENT / DUE DATE</th><th>AMOUNT</th><th>STATUS</th><th></th></tr></thead><tbody id="payments-table"></tbody></table><div class="empty-state hidden" id="payments-empty">No rent payments yet. Add an active tenancy to start tracking rent.</div></div>
+      </section>
+
+      <section class="view" id="maintenance-view">
+        <div class="page-heading"><div><p class="eyebrow">PROPERTY CARE</p><h1>Maintenance</h1><p class="subheading">Resolve repair requests and keep tenants up to date.</p></div><button class="button button-primary" type="button" data-open-dialog="ticket-dialog">＋ New ticket</button></div>
+        <div class="section-summary" id="maintenance-summary"></div>
+        <div class="ticket-list" id="tickets-list"></div><div class="empty-state hidden" id="tickets-empty">No maintenance tickets. New requests will appear here.</div>
+      </section>
+
+      <footer class="footer">A little more peace of mind, one home at a time. <span>Made for better renting <span class="brand-period">♥</span></span></footer>
+    </main>
+
+    <dialog id="property-dialog" class="form-dialog">
+      <form id="property-form">
+        <div class="dialog-heading"><div><p class="eyebrow">PORTFOLIO</p><h2>Add a property</h2></div><button class="close-button" type="button" aria-label="Close dialog">×</button></div>
+        <label>Property name<input name="name" required maxlength="70" placeholder="e.g. Maple House"></label>
+        <label>Street address<input name="address" required maxlength="120" placeholder="e.g. 24 Maple Street"></label>
+        <div class="form-row"><label>City<input name="city" required maxlength="60" placeholder="e.g. Portland"></label><label>Units<input name="units" type="number" min="1" max="100" value="1" required></label></div>
+        <div class="dialog-actions"><button class="button button-secondary close-button" type="button">Cancel</button><button class="button button-primary" type="submit">Add property</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="tenancy-dialog" class="form-dialog">
+      <form id="tenancy-form">
+        <div class="dialog-heading"><div><p class="eyebrow">PEOPLE &amp; LEASES</p><h2>Add a tenancy</h2></div><button class="close-button" type="button" aria-label="Close dialog">×</button></div>
+        <label>Tenant name<input name="tenant" required maxlength="80" placeholder="Full name"></label>
+        <label>Email address<input name="email" type="email" maxlength="120" placeholder="name@example.com"></label>
+        <label>Property<select name="propertyId" required></select></label>
+        <div class="form-row"><label>Monthly rent<input name="rent" type="number" min="1" step="0.01" required placeholder="1,500"></label><label>Rent due day<input name="dueDay" type="number" min="1" max="28" value="1" required></label></div>
+        <div class="form-row"><label>Lease starts<input name="startDate" type="date" required></label><label>Lease ends<input name="endDate" type="date"></label></div>
+        <div class="dialog-actions"><button class="button button-secondary close-button" type="button">Cancel</button><button class="button button-primary" type="submit">Add tenancy</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="payment-dialog" class="form-dialog">
+      <form id="payment-form">
+        <div class="dialog-heading"><div><p class="eyebrow">RENT TRACKING</p><h2>Record a payment</h2></div><button class="close-button" type="button" aria-label="Close dialog">×</button></div>
+        <label>Tenancy<select name="tenancyId" required></select></label>
+        <div class="form-row"><label>Amount<input name="amount" type="number" min="0.01" step="0.01" required></label><label>Payment date<input name="date" type="date" required></label></div>
+        <label>Note<input name="note" maxlength="100" placeholder="Optional note"></label>
+        <div class="dialog-actions"><button class="button button-secondary close-button" type="button">Cancel</button><button class="button button-primary" type="submit">Save payment</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="ticket-dialog" class="form-dialog">
+      <form id="ticket-form">
+        <div class="dialog-heading"><div><p class="eyebrow">PROPERTY CARE</p><h2>New maintenance ticket</h2></div><button class="close-button" type="button" aria-label="Close dialog">×</button></div>
+        <label>Issue title<input name="title" required maxlength="100" placeholder="e.g. Leaking kitchen tap"></label>
+        <label>Property<select name="propertyId" required></select></label>
+        <label>Reported by<select name="tenancyId"></select></label>
+        <div class="form-row"><label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></label><label>Status<select name="status"><option>Open</option><option>In progress</option></select></label></div>
+        <label>Description<textarea name="description" rows="3" maxlength="500" placeholder="Add helpful details about the issue"></textarea></label>
+        <div class="dialog-actions"><button class="button button-secondary close-button" type="button">Cancel</button><button class="button button-primary" type="submit">Create ticket</button></div>
+      </form>
+    </dialog>
+  </body>
+</html>
