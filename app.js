@@ -29,13 +29,19 @@ let data = loadData();
 let toastTimer;
 
 function loadData() {
+  let saved;
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (saved && ["properties", "tenancies", "payments", "tickets"].every((key) => Array.isArray(saved[key]))) return saved;
+    saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
   } catch {
-    // Use sample data when local storage is unavailable or invalid.
+    saved = null;
   }
-  return clone(initialData);
+  if (!saved || !["properties", "tenancies", "payments", "tickets"].every((key) => Array.isArray(saved[key]))) saved = clone(initialData);
+  saved.payments.forEach((payment) => {
+    if (payment.date) return;
+    const tenancy = saved.tenancies.find((item) => item.id === payment.tenancyId);
+    payment.date = payment.status === "Paid" ? new Date().toISOString().slice(0, 10) : dueDateFor(tenancy);
+  });
+  return saved;
 }
 
 function saveData() {
@@ -88,15 +94,31 @@ function monthKey(date) {
 
 function currentMonthPayments() {
   const month = monthKey(new Date());
-  return data.payments.filter((payment) => !payment.date || payment.date.startsWith(month));
+  const payments = data.payments.filter((payment) => payment.date?.startsWith(month));
+  const scheduled = data.tenancies
+    .filter((tenancy) => {
+      if (tenancy.status !== "Active") return false;
+      if (tenancy.startDate && tenancy.startDate.slice(0, 7) > month) return false;
+      if (tenancy.endDate && tenancy.endDate.slice(0, 7) < month) return false;
+      return !payments.some((payment) => payment.tenancyId === tenancy.id);
+    })
+    .map((tenancy) => ({
+      id: `scheduled-${tenancy.id}-${month}`,
+      tenancyId: tenancy.id,
+      amount: tenancy.rent,
+      date: dueDateFor(tenancy),
+      status: "Pending",
+      note: "Monthly rent",
+      scheduled: true
+    }));
+  return [...payments, ...scheduled];
 }
 
 function paymentStatus(payment) {
   if (payment.status === "Paid") return "Paid";
   const tenancy = tenancyById(payment.tenancyId);
-  const due = new Date();
-  due.setDate(tenancy?.dueDay || 1);
-  return due < new Date(new Date().setHours(0, 0, 0, 0)) ? "Overdue" : "Pending";
+  const dueDay = Number(payment.date?.slice(8, 10) || tenancy?.dueDay || 1);
+  return new Date().getDate() > dueDay ? "Overdue" : "Pending";
 }
 
 function badge(status) {
@@ -164,7 +186,7 @@ function renderPayments() {
   const payments = currentMonthPayments();
   const collected = payments.filter((payment) => payment.status === "Paid").reduce((sum, payment) => sum + Number(payment.amount), 0);
   document.getElementById("payments-summary").textContent = `${money(collected)} collected this month · ${payments.filter((payment) => payment.status !== "Paid").length} outstanding`;
-  document.getElementById("payments-table").innerHTML = data.payments.map((payment) => {
+  document.getElementById("payments-table").innerHTML = payments.map((payment) => {
     const tenancy = tenancyById(payment.tenancyId);
     const status = paymentStatus(payment);
     return `<tr><td><strong>${escapeHTML(tenantName(payment.tenancyId))}</strong>${payment.note ? `<small>${escapeHTML(payment.note)}</small>` : ""}</td><td>${escapeHTML(propertyName(tenancy?.propertyId))}</td><td>${formatDate(payment.date || dueDateFor(tenancy))}</td><td>${money(payment.amount)}</td><td>${badge(status)}</td><td>${payment.status !== "Paid" ? `<button class="payment-action" type="button" data-mark-paid="${escapeHTML(payment.id)}">Mark paid</button>` : ""}</td></tr>`;
@@ -282,10 +304,6 @@ document.getElementById("tenancy-form").addEventListener("submit", (event) => {
   }
   const tenancy = { tenant: fields.get("tenant").trim(), email: fields.get("email").trim(), propertyId: fields.get("propertyId"), rent: Number(fields.get("rent")), dueDay: Number(fields.get("dueDay")), startDate, endDate, status: "Active" };
   addRecord("tenancies", tenancy);
-  const firstPayment = { tenancyId: tenancy.id, amount: tenancy.rent, date: "", status: "Pending", note: "Monthly rent" };
-  data.payments.unshift({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, ...firstPayment });
-  saveData();
-  render();
   form.reset();
   document.getElementById("tenancy-dialog").close();
   notify("Tenancy added. Rent tracking is ready.");
@@ -312,8 +330,13 @@ document.getElementById("ticket-form").addEventListener("submit", (event) => {
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-mark-paid]");
   if (!button) return;
-  const payment = data.payments.find((item) => item.id === button.dataset.markPaid);
-  if (!payment) return;
+  let payment = data.payments.find((item) => item.id === button.dataset.markPaid);
+  if (!payment) {
+    const scheduled = currentMonthPayments().find((item) => item.id === button.dataset.markPaid && item.scheduled);
+    if (!scheduled) return;
+    payment = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, tenancyId: scheduled.tenancyId, amount: scheduled.amount, note: scheduled.note };
+    data.payments.unshift(payment);
+  }
   payment.status = "Paid";
   payment.date = new Date().toISOString().slice(0, 10);
   saveData();
@@ -340,7 +363,7 @@ document.getElementById("notifications-button").addEventListener("click", () => 
 
 const now = new Date();
 document.getElementById("today-label").textContent = now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-document.getElementById("greeting").textContent = now.getHours() < 12 ? "YOUR RENTAL PORTFOLIO" : "YOUR RENTAL PORTFOLIO";
+document.getElementById("greeting-time").textContent = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
 const initialView = window.location.hash.slice(1);
 const initialLink = document.querySelector(`[data-view="${initialView}"]`);
 if (initialLink) initialLink.click();
