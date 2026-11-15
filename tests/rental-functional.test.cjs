@@ -14,6 +14,18 @@ function fixture(saved) {
   return dom;
 }
 const scheduled = () => ({ properties: [{ id: 'p', name: 'UAT', address: 'Synthetic', city: 'UAT', units: 1 }], tenancies: [{ id: 't', tenant: 'UAT', propertyId: 'p', rent: 100, dueDay: 1, status: 'Active', startDate: '2026-01-01' }], payments: [], tickets: [] });
+test('rent and collected amounts retain cents in tables and dashboard', () => {
+  const data = scheduled(); data.tenancies[0].rent = 100.25;
+  const d = fixture(data); try {
+    assert.equal(d.window.money(100.25), '$100.25');
+    assert.equal(d.window.money(0.01), '$0.01');
+    assert.equal(d.window.money(0), '$0.00');
+    assert.match(d.window.document.querySelector('#payments-table').textContent, /\$100\.25/);
+    assert.match(d.window.document.querySelector('#rent-total').textContent, /\$100\.25/);
+    d.window.document.querySelector('[data-mark-paid]').click();
+    assert.equal(d.window.document.querySelector('#rent-collected').textContent, '$100.25');
+  } finally { d.window.close(); }
+});
 test('new monthly rent stays visible before the first stored payment', () => {
   const d = fixture(scheduled()); try {
     const table = d.window.document.querySelector('#payments-table');
