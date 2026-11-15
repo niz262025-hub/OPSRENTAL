@@ -191,7 +191,7 @@ function renderPayments() {
     const status = paymentStatus(payment);
     return `<tr><td><strong>${escapeHTML(tenantName(payment.tenancyId))}</strong>${payment.note ? `<small>${escapeHTML(payment.note)}</small>` : ""}</td><td>${escapeHTML(propertyName(tenancy?.propertyId))}</td><td>${formatDate(payment.date || dueDateFor(tenancy))}</td><td>${money(payment.amount)}</td><td>${badge(status)}</td><td>${payment.status !== "Paid" ? `<button class="payment-action" type="button" data-mark-paid="${escapeHTML(payment.id)}">Mark paid</button>` : ""}</td></tr>`;
   }).join("");
-  setTableState("payments-table", "payments-empty", !data.payments.length);
+  setTableState("payments-table", "payments-empty", !payments.length);
 }
 
 function dueDateFor(tenancy) {
@@ -357,7 +357,7 @@ document.addEventListener("change", (event) => {
 
 document.getElementById("notifications-button").addEventListener("click", () => {
   const open = data.tickets.filter((ticket) => ticket.status !== "Resolved").length;
-  const outstanding = data.payments.filter((payment) => paymentStatus(payment) !== "Paid").length;
+  const outstanding = currentMonthPayments().filter((payment) => paymentStatus(payment) !== "Paid").length;
   notify(open || outstanding ? `${open} open maintenance request${open === 1 ? "" : "s"} · ${outstanding} rent payment${outstanding === 1 ? "" : "s"} outstanding` : "You’re all caught up.");
 });
 

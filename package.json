@@ -1,0 +1,12 @@
+{
+  "name": "opsrental-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "check": "node --check app.js"
+  },
+  "devDependencies": {
+    "jsdom": "24.1.3"
+  }
+}
