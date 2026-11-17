@@ -1,0 +1,23 @@
+name: OpsRental automated UAT
+on:
+  push:
+    branches:
+      - fix/opsrental-production-readiness-20261118
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: node --check rental-api.js
+      - run: npm test
