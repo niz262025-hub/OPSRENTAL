@@ -1,6 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createRentalRepository } = require("../rental-api.js");
+const fs = require("node:fs");
+const vm = require("node:vm");
+const source = fs.readFileSync(require.resolve("../rental-api.js"),"utf8");
+const browserModule = { exports: {} };
+vm.runInNewContext(source, {module:browserModule}, {filename:"rental-api.js"});
+const { createRentalRepository } = browserModule.exports;
 const ORG = "12345678-1234-1234-1234-123456789abc";
 function client() {
   const calls = [];
