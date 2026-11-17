@@ -17,3 +17,5 @@ test("reject GET",async()=>{const res=response();await handler({method:"GET",hea
 test("reject malformed POST",async()=>{const res=response();await handler({method:"POST",headers:{host:"example.com"},body:{ticket:"bad"}},res);assert.equal(res.statusCode,400)});
 test("reject cross-origin POST",async()=>{const res=response();await handler({method:"POST",headers:{host:"example.com",origin:"https://evil.example"},body:{ticket}},res);assert.equal(res.statusCode,403)});
 test("reject missing backend key",async()=>{const prev=process.env.MYOPS_APP_PRIVATE_KEY;delete process.env.MYOPS_APP_PRIVATE_KEY;try{const res=response();await handler({method:"POST",headers:{host:"example.com"},body:{ticket}},res);assert.equal(res.statusCode,503)}finally{if(prev!==undefined)process.env.MYOPS_APP_PRIVATE_KEY=prev}});
+
+test("reject malformed Origin without throwing",async()=>{const res=response();await handler({method:"POST",headers:{host:"example.com",origin:"%%%not-a-url"},body:{ticket}},res);assert.equal(res.statusCode,403)});
