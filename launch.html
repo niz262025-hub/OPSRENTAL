@@ -1,0 +1,18 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpsRental — MYOPS launch</title></head><body><main><h1>OpsRental</h1><p id="status" role="status">Verifying MYOPS launch…</p><p><a href="https://www.myops.com.my">Return to MYOPS</a></p></main><script type="module">
+const status=document.getElementById("status");
+const fragment=new URLSearchParams(location.hash.slice(1));
+const ticket=fragment.get("t");
+history.replaceState(null,"",location.pathname);
+if(!ticket || !/^[A-Za-z0-9_-]{43}$/.test(ticket)){status.textContent="Invalid or missing launch ticket. Return to MYOPS."; }
+else{
+  try{
+    const response=await fetch("/api/sso/redeem",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ticket}),cache:"no-store",credentials:"same-origin"});
+    if(!response.ok)throw Error("MYOPS launch could not be verified.");
+    const verified=await response.json();
+    if(verified.verified!==true||verified.product!=="opsrental")throw Error("Invalid application authorization.");
+    // Central ticket verification is not a Supabase database session.
+    // Keep protected workspace closed until backend session bridging is implemented.
+    status.textContent="MYOPS launch verified. OpsRental database session setup is pending.";
+  }catch(e){status.textContent=e.message;}
+}
+</script></body></html>
