@@ -34,6 +34,6 @@ test("prevents overriding organization on create", async () => {
 });
 test("blocks protected foreign keys and tenant reassignment", async () => {
   const c=client(); const repo=createRentalRepository(c,ORG);
-  await assert.rejects(repo.update("leases","lease1",{tenant_user_id:"someone"}),/No editable fields/);
-  await assert.rejects(repo.create("documents",{filename:"test"}),/private storage/);
+  assert.throws(() => repo.update("leases","lease1",{tenant_user_id:"someone"}),/No editable fields/);
+  assert.throws(() => repo.create("documents",{filename:"test"}),/private storage/);
 });
