@@ -24,7 +24,16 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   const origin = req.headers.origin;
   const host = req.headers.host;
-  if (origin && new URL(origin).host !== host) return res.status(403).json({ error: "Origin denied" });
+  if (origin) {
+    try {
+      const parsedOrigin = new URL(origin);
+      if (!["https:", "http:"].includes(parsedOrigin.protocol) || parsedOrigin.host !== host || parsedOrigin.username || parsedOrigin.password) {
+        return res.status(403).json({ error: "Origin denied" });
+      }
+    } catch {
+      return res.status(403).json({ error: "Origin denied" });
+    }
+  }
   const ticket = req.body?.ticket;
   if (typeof ticket !== "string" || !TICKET.test(ticket) || Object.keys(req.body || {}).length !== 1) return res.status(400).json({ error: "Invalid ticket" });
   if (!process.env.MYOPS_APP_PRIVATE_KEY) return res.status(503).json({ error: "SSO signing not configured" });
