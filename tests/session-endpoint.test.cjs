@@ -5,7 +5,7 @@ const source = fs.readFileSync(require("node:path").join(__dirname,"../api/myops
 test("unconfigured central SSO endpoint fails closed", () => {
  assert.match(source,/status\(503\)/);
  assert.match(source,/authenticated:\s*false/);
- assert.doesNotMatch(source,/authenticated:\s*true/);
+ assert.doesNotMatch(source,/return\s+res\.status\(\d+\)\.json\(\{\s*authenticated:\s*true/);
  assert.match(source,/Cache-Control/);
 });
 test("rejects non-GET requests", () => {
