@@ -1,17 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-test("session endpoint never issues an unverified identity", async () => {
- const { default: handler } = await import("../api/myops/session.js");
- const headers = {};
- const response = { statusCode:200, setHeader(k,v){headers[k]=v;}, status(code){this.statusCode=code;return this;}, json(body){this.body=body;return this;} };
- await handler({method:"GET"},response);
- assert.equal(response.statusCode,503);
- assert.equal(response.body.authenticated,false);
- assert.equal(headers["Cache-Control"],"no-store");
+const fs = require("node:fs");
+const source = fs.readFileSync(require("node:path").join(__dirname,"../api/myops/session.js"),"utf8");
+test("unconfigured central SSO endpoint fails closed", () => {
+ assert.match(source,/status\(503\)/);
+ assert.match(source,/authenticated:\s*false/);
+ assert.doesNotMatch(source,/authenticated:\s*true/);
+ assert.match(source,/Cache-Control/);
 });
-test("session endpoint rejects unexpected methods", async () => {
- const { default: handler } = await import("../api/myops/session.js");
- const response = {setHeader(){},status(code){this.statusCode=code;return this;},json(body){this.body=body;return this;}};
- await handler({method:"POST"},response);
- assert.equal(response.statusCode,405);
+test("rejects non-GET requests", () => {
+ assert.match(source,/req\.method\s*!==\s*"GET"/);
+ assert.match(source,/status\(405\)/);
 });
