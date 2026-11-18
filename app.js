@@ -250,9 +250,7 @@ function notify(message) {
 }
 
 function addRecord(collection, record) {
-  data[collection].unshift({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, ...record });
-  saveData();
-  render();
+  throw new Error("Legacy writes are disabled until server-backed forms are available.");
 }
 
 document.querySelectorAll("[data-view]").forEach((link) => {
@@ -337,11 +335,7 @@ document.addEventListener("click", (event) => {
     payment = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, tenancyId: scheduled.tenancyId, amount: scheduled.amount, note: scheduled.note };
     data.payments.unshift(payment);
   }
-  payment.status = "Paid";
-  payment.date = new Date().toISOString().slice(0, 10);
-  saveData();
-  render();
-  notify("Rent marked as paid.");
+  notify("Payment editing is unavailable until server-backed forms are enabled.");
 });
 
 document.addEventListener("change", (event) => {
@@ -349,10 +343,7 @@ document.addEventListener("change", (event) => {
   if (!select) return;
   const ticket = data.tickets.find((item) => item.id === select.dataset.ticketStatus);
   if (!ticket) return;
-  ticket.status = select.value;
-  saveData();
-  render();
-  notify(`Ticket marked ${ticket.status.toLowerCase()}.`);
+  notify("Ticket editing is unavailable until server-backed forms are enabled.");
 });
 
 document.getElementById("notifications-button").addEventListener("click", () => {
