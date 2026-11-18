@@ -18,6 +18,9 @@ async function query(table, filters={},method="GET",body) {
 export default async function handler(req,res){
  res.setHeader("Cache-Control","private, no-store");
  if(!["POST","PATCH"].includes(req.method))return res.status(405).json({error:"Method not allowed"});
+ const origin=req.headers.origin,host=req.headers.host;
+ if(!origin||!host)return res.status(403).json({error:"Same-origin request required"});
+ try { const u=new URL(origin);if(u.protocol!=="https:"||u.host!==host||u.username||u.password)return res.status(403).json({error:"Origin denied"}); }catch{return res.status(403).json({error:"Origin denied"});}
  const table=names[req.query?.resource],resource=req.query?.resource,org=req.query?.organization_id;
  if(!table||typeof org!=="string"||!uuid.test(org))return res.status(400).json({error:"Invalid resource or organization"});
  const sid=parseCookie(req);
