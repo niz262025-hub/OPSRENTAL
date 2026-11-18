@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual, createPrivateKey, createHash, randomBytes, sign } from "node:crypto";
 const cookieName = "__Host-opsrental-session";
-function parseCookie(req) {
+export function parseCookie(req) {
   const value = (req.headers.cookie || "").split(";").map(x => x.trim()).find(x => x.startsWith(cookieName + "="))?.slice(cookieName.length + 1);
   const [body, mac, extra] = (value || "").split(".");
   const secret = process.env.MYOPS_RENTAL_SESSION_SECRET;
@@ -15,7 +15,7 @@ function parseCookie(req) {
   } catch { return null; }
 }
 function canonicalJson(obj) { return JSON.stringify(Object.fromEntries(Object.entries(obj).sort(([a],[b])=>a.localeCompare(b)))); }
-async function checkEntitlement(sid) {
+export async function checkEntitlement(sid) {
   const privateKey = process.env.MYOPS_APP_PRIVATE_KEY;
   if (!privateKey) throw new Error("Missing signing key");
   const path = "/api/app/entitlement";
