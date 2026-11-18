@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/launch",
+      "destination": "/index.html"
+    }
+  ]
+}
