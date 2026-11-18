@@ -16,9 +16,11 @@ test("browser-only data is explicitly labeled development-only", () => {
   assert.match(html, /Do not enter real tenant/);
 });
 
-test("prototype does not pretend to provide server persistence", () => {
-  assert.match(app, /localStorage/);
-  assert.match(html, /not synced to MYOPS/);
+test("rental frontend uses authenticated MYOPS API instead of localStorage", () => {
+  assert.match(app, /\/api\/rental\/organizations/);
+  assert.match(app, /\/api\/rental\/data/);
+  assert.match(app, /\/api\/rental\/write/);
+  assert.doesNotMatch(app, /localStorage\s*\./);
 });
 
 test("core prototype UI remains accessible", () => {
