@@ -277,73 +277,68 @@ document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener(
   if (event.target === dialog) dialog.close();
 }));
 
-document.getElementById("property-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const fields = new FormData(form);
-  addRecord("properties", { name: fields.get("name").trim(), address: fields.get("address").trim(), city: fields.get("city").trim(), units: Number(fields.get("units")) });
-  form.reset();
-  form.elements.units.value = "1";
-  document.getElementById("property-dialog").close();
-  notify("Property added to your portfolio.");
+async function submitRental(resource,body,id) {
+ if(!rentalOrganizationId) throw Error("Organization unavailable");
+ const params=new URLSearchParams({resource,organization_id:rentalOrganizationId});
+ if(id)params.set("id",id);
+ const response=await fetch("/api/rental/write?"+params,{method:id?"PATCH":"POST",credentials:"same-origin",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+ const result=await response.json();
+ if(!response.ok)throw Error(result.error||"Save failed");
+ await loadRemoteData();
+ return result.item;
+}
+async function handleRentalForm(event,resource,makeBody,dialogId) {
+ event.preventDefault();
+ const form=event.currentTarget,button=form.querySelector('[type="submit"]');
+ if(button.disabled)return;
+ button.disabled=true;
+ try {
+  const body=makeBody(new FormData(form));
+  await submitRental(resource,body);
+  form.reset();document.getElementById(dialogId).close();notify("Saved to MYOPS database.");
+ }catch(error){notify(error.message||"Unable to save record.");}
+ finally{button.disabled=false;updateSelects();}
+}
+document.getElementById("property-form").addEventListener("submit",event=>handleRentalForm(event,"properties",f=>({
+ name:String(f.get("name")||"").trim(),address:String(f.get("address")||"").trim(),
+ unit_label:String(f.get("city")||"").trim(),parking_spaces:Number(f.get("units")||1)
+}),"property-dialog"));
+document.getElementById("tenancy-form").addEventListener("submit",event=>handleRentalForm(event,"leases",f=>{
+ const start_date=String(f.get("startDate")||""),end_date=String(f.get("endDate")||"");
+ if(end_date&&end_date<start_date)throw Error("End date must be after start date");
+ // A lease must reference an existing MYOPS user, never a free-text tenant.
+ const tenant_user_id=String(f.get("tenant")||"").trim();
+ if(!/^[0-9a-f-]{36}$/i.test(tenant_user_id))throw Error("Enter the tenant's MYOPS user UUID in the tenant field.");
+ return {property_id:String(f.get("propertyId")),tenant_user_id,monthly_rent:Number(f.get("rent")),currency:"MYR",start_date,end_date:end_date||null,status:"active"};
+},"tenancy-dialog"));
+document.getElementById("payment-form").addEventListener("submit",event=>handleRentalForm(event,"payments",f=>({
+ lease_id:String(f.get("tenancyId")),amount:Number(f.get("amount")),due_date:String(f.get("date")),
+ paid_at:new Date().toISOString(),status:"paid",reference:String(f.get("note")||"").trim()
+}),"payment-dialog"));
+document.getElementById("ticket-form").addEventListener("submit",event=>handleRentalForm(event,"tickets",f=>{
+ const lease_id=String(f.get("tenancyId")||"");
+ if(!lease_id)throw Error("Select a tenancy for this ticket.");
+ const statusMap={"Open":"open","In progress":"in_progress","Resolved":"resolved"};
+ return {lease_id,title:String(f.get("title")||"").trim(),description:String(f.get("description")||"").trim(),status:statusMap[f.get("status")]||"open"};
+},"ticket-dialog"));
+document.addEventListener("click",async event=>{
+ const button=event.target.closest("[data-mark-paid]");
+ if(!button)return;
+ const payment=data.payments.find(x=>x.id===button.dataset.markPaid);
+ if(!payment){notify("Create a payment record first.");return;}
+ button.disabled=true;
+ try{await submitRental("payments",{status:"paid",paid_at:new Date().toISOString()},payment.id);notify("Payment updated.");}
+ catch(error){notify(error.message);}
+ finally{button.disabled=false;}
 });
-
-document.getElementById("tenancy-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const fields = new FormData(form);
-  const startDate = fields.get("startDate");
-  const endDate = fields.get("endDate");
-  if (endDate && endDate < startDate) {
-    form.elements.endDate.setCustomValidity("Lease end date must be on or after the start date.");
-    form.elements.endDate.reportValidity();
-    form.elements.endDate.setCustomValidity("");
-    return;
-  }
-  const tenancy = { tenant: fields.get("tenant").trim(), email: fields.get("email").trim(), propertyId: fields.get("propertyId"), rent: Number(fields.get("rent")), dueDay: Number(fields.get("dueDay")), startDate, endDate, status: "Active" };
-  addRecord("tenancies", tenancy);
-  form.reset();
-  document.getElementById("tenancy-dialog").close();
-  notify("Tenancy added. Rent tracking is ready.");
-});
-
-document.getElementById("payment-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const fields = new FormData(event.currentTarget);
-  addRecord("payments", { tenancyId: fields.get("tenancyId"), amount: Number(fields.get("amount")), date: fields.get("date"), status: "Paid", note: fields.get("note").trim() });
-  event.currentTarget.reset();
-  document.getElementById("payment-dialog").close();
-  notify("Payment recorded.");
-});
-
-document.getElementById("ticket-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const fields = new FormData(event.currentTarget);
-  addRecord("tickets", { title: fields.get("title").trim(), propertyId: fields.get("propertyId"), tenancyId: fields.get("tenancyId"), priority: fields.get("priority"), status: fields.get("status"), description: fields.get("description").trim(), createdAt: new Date().toISOString().slice(0, 10) });
-  event.currentTarget.reset();
-  document.getElementById("ticket-dialog").close();
-  notify("Maintenance ticket created.");
-});
-
-document.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-mark-paid]");
-  if (!button) return;
-  let payment = data.payments.find((item) => item.id === button.dataset.markPaid);
-  if (!payment) {
-    const scheduled = currentMonthPayments().find((item) => item.id === button.dataset.markPaid && item.scheduled);
-    if (!scheduled) return;
-    payment = { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, tenancyId: scheduled.tenancyId, amount: scheduled.amount, note: scheduled.note };
-    data.payments.unshift(payment);
-  }
-  notify("Payment editing is unavailable until server-backed forms are enabled.");
-});
-
-document.addEventListener("change", (event) => {
-  const select = event.target.closest("[data-ticket-status]");
-  if (!select) return;
-  const ticket = data.tickets.find((item) => item.id === select.dataset.ticketStatus);
-  if (!ticket) return;
-  notify("Ticket editing is unavailable until server-backed forms are enabled.");
+document.addEventListener("change",async event=>{
+ const select=event.target.closest("[data-ticket-status]");
+ if(!select)return;
+ const statuses={"Open":"open","In progress":"in_progress","Resolved":"resolved"};
+ select.disabled=true;
+ try{await submitRental("tickets",{status:statuses[select.value]},select.dataset.ticketStatus);notify("Ticket updated.");}
+ catch(error){notify(error.message);await loadRemoteData().catch(()=>{});}
+ finally{select.disabled=false;}
 });
 
 document.getElementById("notifications-button").addEventListener("click", () => {
@@ -355,4 +350,9 @@ document.getElementById("notifications-button").addEventListener("click", () => 
 const now = new Date();
 document.getElementById("today-label").textContent = now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 document.getElementById("greeting-time").textContent = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
-const initialView = window.location.hash.slice(1);\nconst initialLink = document.querySelector(`[data-view="${initialView}"]`);\nif (initialLink) initialLink.click();\n// Legacy forms require a server-side identity-aware migration before writes are safe.\ndocument.querySelectorAll("[data-open-dialog], [data-mark-paid], [data-ticket-status]").forEach(el=>{el.disabled=true;el.title="Editing is temporarily unavailable while MYOPS database integration is completed.";});\nloadRemoteData().catch(error=>{document.querySelector("#dashboard-stats").textContent="Unable to load OpsRental data: "+error.message;});\n
+const initialView = window.location.hash.slice(1);
+const initialLink = document.querySelector(`[data-view="${initialView}"]`);
+if (initialLink) initialLink.click();
+// Legacy forms require a server-side identity-aware migration before writes are safe.
+
+loadRemoteData().catch(error=>{document.querySelector("#dashboard-stats").textContent="Unable to load OpsRental data: "+error.message;});
