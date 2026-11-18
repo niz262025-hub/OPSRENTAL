@@ -25,33 +25,33 @@ const initialData = {
 };
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
-let data = loadData();
+let data = {properties:[],tenancies:[],payments:[],tickets:[]};
+let rentalOrganizationId = null;
 let toastTimer;
 
-function loadData() {
-  let saved;
-  try {
-    saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    saved = null;
-  }
-  if (!saved || !["properties", "tenancies", "payments", "tickets"].every((key) => Array.isArray(saved[key]))) saved = clone(initialData);
-  saved.payments.forEach((payment) => {
-    if (payment.date) return;
-    const tenancy = saved.tenancies.find((item) => item.id === payment.tenancyId);
-    payment.date = payment.status === "Paid" ? new Date().toISOString().slice(0, 10) : dueDateFor(tenancy);
-  });
-  return saved;
+// Server records are authoritative. Never fall back to demo data or browser storage.
+function saveData() { throw new Error("Browser persistence is disabled; use the MYOPS API."); }
+async function rentalGet(path) {
+  const response = await fetch(path,{credentials:"same-origin",cache:"no-store"});
+  if(!response.ok) throw new Error("MYOPS data request failed ("+response.status+")");
+  return response.json();
 }
-
-function saveData() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch {
-    notify("Changes are visible, but could not be saved in this browser.");
-  }
+async function loadRemoteData() {
+  const orgs = await rentalGet("/api/rental/organizations");
+  if(!Array.isArray(orgs.organizations) || !orgs.organizations.length) throw new Error("No authorized MYOPS organization");
+  const org = orgs.organizations.find(x=>["owner","admin","manager"].includes(x.role)) || orgs.organizations[0];
+  rentalOrganizationId = org.organization_id;
+  const resources = ["properties","leases","payments","tickets"];
+  const results = await Promise.all(resources.map(resource=>rentalGet("/api/rental/data?resource="+resource+"&organization_id="+encodeURIComponent(rentalOrganizationId))));
+  const [properties,leases,payments,tickets] = results.map(r=>r.items || []);
+  data = {
+    properties:properties.map(p=>({id:p.id,name:p.name,address:p.address,city:p.unit_label||"",units:Math.max(1,Number(p.parking_spaces)||1)})),
+    tenancies:leases.map(l=>({id:l.id,tenant:"Tenant",email:"",propertyId:l.property_id,rent:Number(l.monthly_rent),dueDay:1,startDate:l.start_date,endDate:l.end_date||"",status:l.status==="active"?"Active":"Ended"})),
+    payments:payments.map(p=>({id:p.id,tenancyId:p.lease_id,amount:Number(p.amount),date:(p.paid_at||p.due_date||"").slice(0,10),status:p.status==="paid"?"Paid":"Pending",note:p.reference||""})),
+    tickets:tickets.map(t=>({id:t.id,title:t.title,propertyId:leases.find(l=>l.id===t.lease_id)?.property_id||"",tenancyId:t.lease_id,priority:"Normal",status:t.status==="in_progress"?"In progress":t.status==="resolved"||t.status==="closed"?"Resolved":"Open",description:t.description||"",createdAt:(t.created_at||"").slice(0,10)}))
+  };
+  render();
 }
-
 function escapeHTML(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -364,7 +364,4 @@ document.getElementById("notifications-button").addEventListener("click", () => 
 const now = new Date();
 document.getElementById("today-label").textContent = now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 document.getElementById("greeting-time").textContent = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
-const initialView = window.location.hash.slice(1);
-const initialLink = document.querySelector(`[data-view="${initialView}"]`);
-if (initialLink) initialLink.click();
-render();
+const initialView = window.location.hash.slice(1);\nconst initialLink = document.querySelector(`[data-view="${initialView}"]`);\nif (initialLink) initialLink.click();\n// Legacy forms require a server-side identity-aware migration before writes are safe.\ndocument.querySelectorAll("[data-open-dialog], [data-mark-paid], [data-ticket-status]").forEach(el=>{el.disabled=true;el.title="Editing is temporarily unavailable while MYOPS database integration is completed.";});\nloadRemoteData().catch(error=>{document.querySelector("#dashboard-stats").textContent="Unable to load OpsRental data: "+error.message;});\n
