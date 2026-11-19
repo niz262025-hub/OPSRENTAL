@@ -1,0 +1,147 @@
+:root {
+  --bg: #f4f7fb;
+  --panel: #ffffff;
+  --border: #dfe7f2;
+  --primary: #0d4f8d;
+  --primary-strong: #082d4b;
+  --muted: #5f6a78;
+  --danger: #b42318;
+  --shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  font-family: Inter, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: #1f2937;
+}
+
+body {
+  padding: 24px;
+}
+
+#app {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.topbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 20px;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 12px 16px;
+}
+
+.nav-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  transition: opacity 0.2s ease;
+}
+
+.nav-action:hover {
+  opacity: 0.92;
+}
+
+.myops-link {
+  background: rgba(13, 79, 141, 0.10);
+  color: var(--primary-strong);
+}
+
+.logout-button {
+  background: var(--danger);
+  color: white;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  gap: 20px;
+}
+
+.sidebar,
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.sidebar {
+  padding: 20px;
+}
+
+.sidebar h2,
+.panel h1 {
+  margin: 0 0 16px;
+}
+
+.menu {
+  display: grid;
+  gap: 8px;
+}
+
+.menu a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
+.menu a.active {
+  background: rgba(13, 79, 141, 0.10);
+}
+
+.panel {
+  padding: 24px;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 0.96rem;
+}
+
+@media (max-width: 720px) {
+  body {
+    padding: 12px;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    justify-content: stretch;
+  }
+
+  .nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

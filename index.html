@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpsRental</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { mountApp, setSession, DEFAULT_TENANT } from './app.js';
+
+      const appId = 'opsrental';
+      const route = '/admin/dashboard';
+      const userRole = 'admin';
+
+      setSession(appId, {
+        userRole,
+        tenantId: DEFAULT_TENANT,
+        expiresAt: Date.now() + 60 * 60 * 1000,
+      });
+
+      mountApp({ appId, route, userRole, tenantId: DEFAULT_TENANT });
+    </script>
+  </body>
+</html>
