@@ -1,4 +1,5 @@
 import {parseCookie,checkEntitlement} from "../sso/session.js";
+import {rentalDatabaseUrl} from './db-config.js';
 const names={properties:"rental_properties",leases:"rental_leases",payments:"rental_payments",tickets:"rental_tickets"};
 const fields={
  properties:["name","address","unit_label","parking_spaces"],
@@ -8,8 +9,8 @@ const fields={
 };
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function query(table, filters={},method="GET",body) {
- const base=process.env.MYOPS_RENTAL_SUPABASE_URL,key=process.env.MYOPS_RENTAL_SERVICE_ROLE_KEY;
- if(!base||!/^https:\/\/[^/]+\.supabase\.co\/?$/.test(base)||!key)throw Error("config");
+ const base=rentalDatabaseUrl(),key=process.env.MYOPS_RENTAL_SERVICE_ROLE_KEY;
+ if(!key)throw Error("config");
  const url=new URL("/rest/v1/"+table,base);url.searchParams.set("select","*");
  for(const [k,v] of Object.entries(filters))url.searchParams.set(k,"eq."+v);
  const response=await fetch(url,{method,headers:{apikey:key,Authorization:"Bearer "+key,"content-type":"application/json",Prefer:"return=representation"},body:body?JSON.stringify(body):undefined,cache:"no-store",signal:AbortSignal.timeout(8000)});

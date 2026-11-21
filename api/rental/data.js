@@ -1,4 +1,5 @@
 import { parseCookie, checkEntitlement } from "../sso/session.js";
+import { rentalDatabaseUrl } from './db-config.js';
 const tables = Object.freeze({
   properties: "rental_properties", leases: "rental_leases",
   payments: "rental_payments", tickets: "rental_tickets",
@@ -6,9 +7,9 @@ const tables = Object.freeze({
 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function db(table, filters) {
-  const base = process.env.MYOPS_RENTAL_SUPABASE_URL;
+  const base = rentalDatabaseUrl();
   const key = process.env.MYOPS_RENTAL_SERVICE_ROLE_KEY;
-  if (!base || !/^https:\/\/[^/]+\.supabase\.co\/?$/.test(base) || !key) throw new Error("Database not configured");
+  if (!key) throw new Error("Database not configured");
   const url = new URL("/rest/v1/" + table, base);
   url.searchParams.set("select", "*");
   for (const [k,v] of Object.entries(filters)) url.searchParams.set(k, "eq." + v);

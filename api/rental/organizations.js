@@ -1,8 +1,9 @@
 import {parseCookie,checkEntitlement} from "../sso/session.js";
+import {rentalDatabaseUrl} from './db-config.js';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function lookup(table,filters){
- const base=process.env.MYOPS_RENTAL_SUPABASE_URL,key=process.env.MYOPS_RENTAL_SERVICE_ROLE_KEY;
- if(!base||!/^https:\/\/[^/]+\.supabase\.co\/?$/.test(base)||!key)throw Error("Configuration unavailable");
+ const base=rentalDatabaseUrl(),key=process.env.MYOPS_RENTAL_SERVICE_ROLE_KEY;
+ if(!key)throw Error("Configuration unavailable");
  const url=new URL("/rest/v1/"+table,base);url.searchParams.set("select","*");
  for(const [k,v] of Object.entries(filters))url.searchParams.set(k,"eq."+v);
  const r=await fetch(url,{headers:{apikey:key,Authorization:"Bearer "+key},cache:"no-store",signal:AbortSignal.timeout(8000)});
