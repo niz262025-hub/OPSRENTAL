@@ -1,6 +1,7 @@
 import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
 import { parseCookie, checkEntitlement } from '../sso/session.js';
 import { rentalDatabaseUrl } from './db-config.js';
+import {createHmac,timingSafeEqual} from 'node:crypto';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Base64 and JSON must fit within Vercel's request limit.
@@ -28,10 +29,27 @@ async function rows(table,filters={},method='GET',payload){
  const r=await call('/rest/v1/'+table+'?'+q,method,payload===undefined?undefined:JSON.stringify(payload),{'content-type':'application/json',Prefer:'return=representation'});
  return r.json();
 }
+function tokenMac(body){
+ const secret=process.env.MYOPS_RENTAL_SESSION_SECRET;
+ if(!secret||Buffer.byteLength(secret)<32)throw Error('Signing secret unavailable');
+ return createHmac('sha256',secret).update('opsrental-document-view-v1.').update(body).digest();
+}
+function issueToken(id,org,sid){
+ const body=Buffer.from(JSON.stringify({id,org,sid,exp:Date.now()+60000})).toString('base64url');
+ return body+'.'+tokenMac(body).toString('base64url');
+}
+function verifyToken(token,id,org,sid){
+ if(typeof token!=='string'||token.length>1024||!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token))return false;
+ const [body,mac]=token.split('.'),expected=tokenMac(body),actual=Buffer.from(mac,'base64url');
+ if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return false;
+ try{const value=JSON.parse(Buffer.from(body,'base64url').toString('utf8'));return value.id===id&&value.org===org&&value.sid===sid&&Number.isSafeInteger(value.exp)&&value.exp>Date.now()&&value.exp<=Date.now()+60000;}catch{return false;}
+}
 function deny(res,status,message){return res.status(status).json({error:message});}
 function sameOrigin(req){try{const u=new URL(req.headers.origin);return u.protocol==='https:'&&u.host===req.headers.host&&!u.username&&!u.password;}catch{return false;}}
 export default async function handler(req,res){
  res.setHeader('Cache-Control','private, no-store');
+ res.setHeader('X-Content-Type-Options','nosniff');
+ res.setHeader('Referrer-Policy','no-referrer');
  if(rentalAccessDisabled())return deny(res,503,'Rental access disabled');
  if(!['GET','POST','DELETE'].includes(req.method))return deny(res,405,'Method not allowed');
  if(req.method!=='GET'&&!sameOrigin(req))return deny(res,403,'Same-origin required');
@@ -84,23 +102,21 @@ export default async function handler(req,res){
   if(doc.storage_path !== org+'/'+doc.id)return deny(res,403,'Invalid storage ownership');
   if(req.method==='GET'&&doc.state!=='ready')return deny(res,409,'Document is not available');
   if(req.method==='GET'&&action==='signed-url'){
-   const r=await call('/storage/v1/object/sign/'+bucket+'/'+doc.storage_path,'POST',JSON.stringify({expiresIn:60}),{'content-type':'application/json'});
-   const signed=await r.json();
-   if(!signed.signedURL)return deny(res,503,'Signed URL unavailable');
-   const signedPath = signed.signedURL.startsWith('/storage/v1/') ? signed.signedURL : '/storage/v1'+signed.signedURL;
-   if(!signedPath.startsWith('/storage/v1/object/sign/'+bucket+'/'+doc.storage_path+'?'))return deny(res,503,'Invalid signed URL');
-   return res.status(200).json({url:new URL(signedPath,backendConfig().base).toString(),expires_in:60});
+   const token=issueToken(id,org,sid);
+   const params=new URLSearchParams({organization_id:org,id,action:'signed-view',token});
+   return res.status(200).json({url:'/api/rental/documents?'+params.toString(),expires_in:60});
   }
-  if(req.method==='GET'&&['view','download'].includes(action)){
+  if(req.method==='GET'&&action==='signed-view'&&!verifyToken(req.query?.token,id,org,sid))return deny(res,403,'Invalid or expired document link');
+  if(req.method==='GET'&&['view','download','signed-view'].includes(action)){
    const r=await call('/storage/v1/object/authenticated/'+bucket+'/'+doc.storage_path);
    const bytes=Buffer.from(await r.arrayBuffer());
    // Determine inline type from validated bytes, not a client supplied filename.
    const safeType=['application/pdf','image/png','image/jpeg','text/plain'].find(type=>validSignature(bytes,type));
-   if(action==='view'&&!safeType)return deny(res,415,'Document cannot be displayed safely');
-   res.setHeader('Content-Type',action==='view'?safeType:'application/octet-stream');
+   if(action!=='download'&&!safeType)return deny(res,415,'Document cannot be displayed safely');
+   res.setHeader('Content-Type',action!=='download'?safeType:'application/octet-stream');
    res.setHeader('X-Content-Type-Options','nosniff');
    res.setHeader('Content-Security-Policy',"sandbox; default-src 'none'; style-src 'unsafe-inline'");
-   res.setHeader('Content-Disposition',(action==='view'?'inline':'attachment')+"; filename*=UTF-8''"+encodeURIComponent(doc.filename));
+   res.setHeader('Content-Disposition',(action!=='download'?'inline':'attachment')+"; filename*=UTF-8''"+encodeURIComponent(doc.filename));
    return res.status(200).send(bytes);
   }
   if(req.method==='DELETE'&&action==='delete'){
