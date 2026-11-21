@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 
-test('staging foundation rejects cross-tenant references and fails closed on reapplication', async () => {
+test('staging foundation rejects cross-tenant references and preserves data on reapplication', async () => {
   const db = new PGlite();
   const orgA = '00000000-0000-4000-8000-000000000001';
   const orgB = '00000000-0000-4000-8000-000000000002';
@@ -24,7 +24,23 @@ test('staging foundation rejects cross-tenant references and fails closed on rea
     await db.exec('set role authenticated');
     await assert.rejects(db.query('select * from public.rental_properties'), /permission denied/);
     await db.exec('reset role');
-    await assert.rejects(db.exec(sql), /already exists/);
+    await db.exec(sql);
     assert.equal((await db.query('select count(*)::int as n from public.rental_properties')).rows[0].n,1);
+  } finally { await db.close(); }
+});
+
+test('staging foundation refuses pre-existing rental tables without modifying them', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create role anon; create role authenticated; create schema auth;
+      create table auth.users(id uuid primary key);
+      create table public.myops_organizations(id uuid primary key);
+      create table public.rental_properties(id integer primary key);
+      insert into public.rental_properties values (42);
+      set myops.allow_rental_staging='wengxxiqwtosirealghx';`);
+    const sql = await readFile(new URL('../supabase/proposals/20261121104119_rental_staging_foundation.sql', import.meta.url), 'utf8');
+    await assert.rejects(db.exec(sql), /Existing rental objects require manual review/);
+    assert.equal((await db.query('select id from public.rental_properties')).rows[0].id, 42);
+    assert.equal((await db.query("select to_regclass('public.myops_rental_staging_foundation_marker') as marker")).rows[0].marker, null);
   } finally { await db.close(); }
 });
