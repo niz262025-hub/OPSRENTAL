@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHmac,generateKeyPairSync} from 'node:crypto';
 import handler from '../api/rental/documents.js';
 const sid='00000000-0000-4000-8000-000000000001', user='00000000-0000-4000-8000-000000000002', org='00000000-0000-4000-8000-000000000003', prop='00000000-0000-4000-8000-000000000004';
-const response=()=>({setHeader(){},status(n){this.code=n;return this},json(v){this.body=v;return this},send(v){this.body=v;return this}});
+const response=()=>({headers:{},setHeader(k,v){this.headers[k]=v},status(n){this.code=n;return this},json(v){this.body=v;return this},send(v){this.body=v;return this}});
 test('document API checks signatures, organization, session and private bucket before storage',async()=>{
  const old={...process.env}, fetch0=globalThis.fetch; const {privateKey}=generateKeyPairSync('ed25519');
  Object.assign(process.env,{VERCEL_ENV:'preview',MYOPS_API_ORIGIN:'https://southerndotcom-website-git-feat-myop-ca0019-mohd-syaiful-nizam1.vercel.app',MYOPS_RENTAL_SUPABASE_URL:'https://wengxxiqwtosirealghx.supabase.co',MYOPS_RENTAL_SERVICE_ROLE_KEY:'test',MYOPS_RENTAL_SESSION_SECRET:'synthetic-secret-12345678901234567890',MYOPS_APP_PRIVATE_KEY:privateKey.export({type:'pkcs8',format:'pem'}).toString()});
@@ -30,16 +30,17 @@ test('partial failures retain metadata for retry and incomplete files cannot be 
  Object.assign(process.env,{VERCEL_ENV:'preview',MYOPS_API_ORIGIN:'https://southerndotcom-website-git-feat-myop-ca0019-mohd-syaiful-nizam1.vercel.app',MYOPS_RENTAL_SUPABASE_URL:'https://wengxxiqwtosirealghx.supabase.co',MYOPS_RENTAL_SERVICE_ROLE_KEY:'test',MYOPS_RENTAL_SESSION_SECRET:'synthetic-secret-12345678901234567890',MYOPS_APP_PRIVATE_KEY:privateKey.export({type:'pkcs8',format:'pem'}).toString()});
  const body=Buffer.from(JSON.stringify({sid,exp:Date.now()+60000})).toString('base64url'),mac=createHmac('sha256',process.env.MYOPS_RENTAL_SESSION_SECRET).update(body).digest('base64url');
  const headers={cookie:`__Host-opsrental-session=${body}.${mac}`,origin:'https://rental.example',host:'rental.example'};
- let doc=null, bucketMissing=false, failUpload=false,failDelete=false,failMetadataDelete=false,failMetadataInsert=false,signCalls=0,storageUploads=0;
+ let doc=null, bucketMissing=false, failUpload=false,failDelete=false,failMetadataDelete=false,failMetadataInsert=false,failDownload=false,role='owner', revoked=false, signCalls=0,storageUploads=0, uploadHeaders=null, signedExpires=null;
  const ok=payload=>({ok:true,json:async()=>payload});
  globalThis.fetch=async(url,opt={})=>{const u=new URL(url),t=u.pathname.split('/').pop(),method=opt.method||'GET';
-  if(u.pathname==='/api/app/entitlement')return ok({entitled:true,session_active:true});
+  if(u.pathname==='/api/app/entitlement')return ok({entitled:true,session_active:!revoked});
   if(u.pathname==='/storage/v1/bucket/opsrental-private')return bucketMissing?{ok:false,status:404}:ok({id:'opsrental-private',public:false});
-  if(u.pathname.startsWith('/storage/v1/object/sign/')){signCalls++;return ok({signedURL:'/object/sign/opsrental-private/'+doc.storage_path+'?token=test'});}
+  if(u.pathname.startsWith('/storage/v1/object/sign/')){signCalls++;signedExpires=JSON.parse(opt.body).expiresIn;return ok({signedURL:'/object/sign/opsrental-private/'+doc.storage_path+'?token=test'});}
+  if(u.pathname.startsWith('/storage/v1/object/authenticated/'))return failDownload?{ok:false,status:500}:{ok:true,arrayBuffer:async()=>Buffer.from('%PDF-example')};
   if(u.pathname==='/storage/v1/object/opsrental-private'&&method==='DELETE')return failDelete?{ok:false,status:500}:ok([]);
-  if(u.pathname.startsWith('/storage/v1/object/opsrental-private/')&&method==='POST'){storageUploads++;return failUpload?{ok:false,status:500}:ok({});}
+  if(u.pathname.startsWith('/storage/v1/object/opsrental-private/')&&method==='POST'){storageUploads++;uploadHeaders=opt.headers;return failUpload?{ok:false,status:500}:ok({});}
   if(t==='myops_app_sessions')return ok([{user_id:user,revoked_at:null,product_slug:'opsrental'}]);
-  if(t==='myops_memberships')return ok([{role:'owner'}]);
+  if(t==='myops_memberships')return ok(u.searchParams.get('organization_id')===`eq.${org}`?[{role}]:[]);
   if(t==='myops_app_grants')return ok([{user_id:user,organization_id:org,product_slug:'opsrental'}]);
   if(t==='myops_subscriptions')return ok([{organization_id:org,status:'active',product_slug:'opsrental',personal_user_id:null}]);
   if(t==='rental_properties')return ok([{id:prop}]);
@@ -62,6 +63,10 @@ test('partial failures retain metadata for retry and incomplete files cannot be 
   assert.equal((await req('GET','signed-url',{},doc.id)).code,409);assert.equal(signCalls,0);
   failDelete=false;failMetadataDelete=true;assert.equal((await req('DELETE','delete',{},doc.id)).code,503);assert.equal(doc.state,'deleting');
   failMetadataDelete=false;assert.equal((await req('DELETE','delete',{},doc.id)).code,200);assert.equal(doc,null);
-  assert.equal((await req('POST','upload',file)).code,201);assert.equal(doc.state,'ready');const signed=await req('GET','signed-url',{},doc.id);assert.equal(signed.code,200);assert.equal(signed.body.expires_in,60);
+  assert.equal((await req('POST','upload',file)).code,201);assert.equal(doc.state,'ready');const signed=await req('GET','signed-url',{},doc.id);assert.equal(signed.code,200);assert.equal(signed.body.expires_in,60);assert.equal(signedExpires,60);assert.equal(uploadHeaders['cache-control'],'no-store');assert.equal(signed.headers['Cache-Control'],'private, no-store');
+  failDownload=true;assert.equal((await req('GET','download',{},doc.id)).code,503);assert.equal(doc.state,'ready');failDownload=false;assert.equal((await req('GET','download',{},doc.id)).code,200);
+  role='tenant';assert.equal((await req('GET','signed-url',{},doc.id)).code,403);role='owner';revoked=true;assert.equal((await req('GET','signed-url',{},doc.id)).code,403);revoked=false;
+  const foreign=response();await handler({method:'GET',headers,query:{organization_id:prop,action:'signed-url',id:doc.id}},foreign);assert.equal(foreign.code,403);
+  process.env.MYOPS_RENTAL_ACCESS_DISABLED='true';assert.equal((await req('GET','download',{},doc.id)).code,503);
  }finally{globalThis.fetch=original;process.env=old;}
 });
