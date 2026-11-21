@@ -35,13 +35,15 @@ test('disposable real private Storage and Postgres integration', {timeout:180000
   r=await req('GET','list');assert.equal(r.code,200);assert.ok(r.body.items.some(x=>x.id===id));
   const noAuth=await fetch(new URL('/storage/v1/object/public/opsrental-private/'+org+'/'+id,local));assert.ok(!noAuth.ok,'anonymous object denied');
   r=await req('GET','download',{id});assert.equal(r.code,200);assert.equal(createHash('sha256').update(r.body).digest('hex'),createHash('sha256').update(Buffer.from(file.content_base64,'base64')).digest('hex'));
+  const proxy=await req('GET','view',{id});assert.equal(proxy.code,200);assert.match(proxy.headers['Cache-Control'],/private, no-store/);assert.equal(proxy.headers['X-Content-Type-Options'],'nosniff');assert.match(proxy.headers['Content-Security-Policy'],/sandbox/);
   r=await req('GET','signed-url',{id});assert.equal(r.code,200);assert.equal(r.body.expires_in,60);const signed=r.body.url;
   const view=await fetch(signed);assert.equal(view.status,200);assert.equal(createHash('sha256').update(Buffer.from(await view.arrayBuffer())).digest('hex'),createHash('sha256').update(Buffer.from(file.content_base64,'base64')).digest('hex'));
   const cache=view.headers.get('cache-control');
+  console.log('Storage response cache-control:',cache??'(absent)','expires:',view.headers.get('expires')??'(absent)','age:',view.headers.get('age')??'(absent)');
   assert.equal((await req('GET','signed-url',{id,organization_id:foreign})).code,403);
-  await admin('/rest/v1/myops_memberships?user_id=eq.'+user,{method:'PATCH',body:JSON.stringify({role:'tenant'})});assert.equal((await req('GET','download',{id})).code,403);
+  await admin('/rest/v1/myops_memberships?user_id=eq.'+user,{method:'PATCH',body:JSON.stringify({role:'tenant'})});assert.equal((await req('GET','view',{id})).code,403);assert.equal((await req('GET','download',{id})).code,403);
   await admin('/rest/v1/myops_memberships?user_id=eq.'+user,{method:'PATCH',body:JSON.stringify({role:'owner'})});
-  await admin('/rest/v1/myops_app_sessions?id=eq.'+sid,{method:'PATCH',body:JSON.stringify({revoked_at:new Date().toISOString()})});assert.equal((await req('GET','download',{id})).code,403);
+  await admin('/rest/v1/myops_app_sessions?id=eq.'+sid,{method:'PATCH',body:JSON.stringify({revoked_at:new Date().toISOString()})});assert.equal((await req('GET','view',{id})).code,403);assert.equal((await req('GET','download',{id})).code,403);
   await admin('/rest/v1/myops_app_sessions?id=eq.'+sid,{method:'PATCH',body:JSON.stringify({revoked_at:null})});process.env.MYOPS_RENTAL_ACCESS_DISABLED='true';assert.equal((await req('GET','download',{id})).code,503);delete process.env.MYOPS_RENTAL_ACCESS_DISABLED;
   assert.equal((await req('POST','upload',{...file,property_id:undefined,lease_id:lease})).code,201,'tenancy upload');
   assert.equal((await req('POST','upload',{...file,mime_type:'application/pdf'})).code,400);

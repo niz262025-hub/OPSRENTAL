@@ -91,11 +91,16 @@ export default async function handler(req,res){
    if(!signedPath.startsWith('/storage/v1/object/sign/'+bucket+'/'+doc.storage_path+'?'))return deny(res,503,'Invalid signed URL');
    return res.status(200).json({url:new URL(signedPath,backendConfig().base).toString(),expires_in:60});
   }
-  if(req.method==='GET'&&action==='download'){
+  if(req.method==='GET'&&['view','download'].includes(action)){
    const r=await call('/storage/v1/object/authenticated/'+bucket+'/'+doc.storage_path);
    const bytes=Buffer.from(await r.arrayBuffer());
-   res.setHeader('Content-Type','application/octet-stream');
-   res.setHeader('Content-Disposition',"attachment; filename*=UTF-8''"+encodeURIComponent(doc.filename));
+   // Determine inline type from validated bytes, not a client supplied filename.
+   const safeType=['application/pdf','image/png','image/jpeg','text/plain'].find(type=>validSignature(bytes,type));
+   if(action==='view'&&!safeType)return deny(res,415,'Document cannot be displayed safely');
+   res.setHeader('Content-Type',action==='view'?safeType:'application/octet-stream');
+   res.setHeader('X-Content-Type-Options','nosniff');
+   res.setHeader('Content-Security-Policy',"sandbox; default-src 'none'; style-src 'unsafe-inline'");
+   res.setHeader('Content-Disposition',(action==='view'?'inline':'attachment')+"; filename*=UTF-8''"+encodeURIComponent(doc.filename));
    return res.status(200).send(bytes);
   }
   if(req.method==='DELETE'&&action==='delete'){

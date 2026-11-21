@@ -37,8 +37,7 @@
         if(action==='View'){
          const preview=window.open('about:blank','_blank');
          if(!preview)throw Error('Allow pop-ups to view documents');
-         let result; try { result=await request(url('signed-url','&id='+encodeURIComponent(item.id))); } catch (err) { preview.close(); throw err; }
-         preview.opener=null;preview.location.replace(result.url);return;
+         preview.opener=null;preview.location.replace(url('view','&id='+encodeURIComponent(item.id)));return;
         }
         const r=await fetch(url('download','&id='+encodeURIComponent(item.id)),{credentials:'same-origin',cache:'no-store'});
         if(!r.ok)throw Error('Download denied');
