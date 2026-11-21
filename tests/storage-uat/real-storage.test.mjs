@@ -37,7 +37,7 @@ test('disposable real private Storage and Postgres integration', {timeout:180000
   r=await req('GET','download',{id});assert.equal(r.code,200);assert.equal(createHash('sha256').update(r.body).digest('hex'),createHash('sha256').update(Buffer.from(file.content_base64,'base64')).digest('hex'));
   r=await req('GET','signed-url',{id});assert.equal(r.code,200);assert.equal(r.body.expires_in,60);const signed=r.body.url;
   const view=await fetch(signed);assert.equal(view.status,200);assert.equal(createHash('sha256').update(Buffer.from(await view.arrayBuffer())).digest('hex'),createHash('sha256').update(Buffer.from(file.content_base64,'base64')).digest('hex'));
-  const cache=view.headers.get('cache-control');assert.ok(cache,'storage cache header exists');
+  const cache=view.headers.get('cache-control');
   assert.equal((await req('GET','signed-url',{id,organization_id:foreign})).code,403);
   await admin('/rest/v1/myops_memberships?user_id=eq.'+user,{method:'PATCH',body:JSON.stringify({role:'tenant'})});assert.equal((await req('GET','download',{id})).code,403);
   await admin('/rest/v1/myops_memberships?user_id=eq.'+user,{method:'PATCH',body:JSON.stringify({role:'owner'})});
@@ -51,5 +51,6 @@ test('disposable real private Storage and Postgres integration', {timeout:180000
   await new Promise(resolve=>setTimeout(resolve,62000));const expired=await fetch(signed);assert.ok(!expired.ok,'signed URL expired at storage origin');
   assert.equal((await req('DELETE','delete',{id})).code,200);r=await req('GET','list');assert.ok(!r.body.items.some(x=>x.id===id));
   const after=await admin('/storage/v1/object/authenticated/opsrental-private/'+org+'/'+id);assert.ok(!after.ok,'object removed');
+  assert.ok(cache && /(?:no-store|no-cache|max-age=0)/i.test(cache),'signed view must send restrictive cache-control');
  } finally {globalThis.fetch=originalFetch;}
 });
