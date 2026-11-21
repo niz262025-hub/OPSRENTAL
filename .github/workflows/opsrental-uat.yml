@@ -47,10 +47,10 @@ jobs:
           cli="$test_dir/node_modules/.bin/supabase"
           cd "$test_dir"
           "$cli" init >/dev/null
-          cleanup() { "$cli" stop --stack rental-uat >/dev/null 2>&1 || true; }
+          cleanup() { "$cli" stop >/dev/null 2>&1 || true; }
           trap cleanup EXIT
-          "$cli" start --stack rental-uat --runtime native --preparation on-demand --exclude realtime,functions,studio,mail,analytics,pooler > "$RUNNER_TEMP/supabase-start.log" 2>&1 || { echo 'Local Supabase failed to start; inspect runner service connectivity.'; exit 1; }
-          "$cli" status --stack rental-uat --env --output-format text > "$RUNNER_TEMP/supabase-local.env"
+          "$cli" start --runtime native --preparation on-demand --exclude realtime,functions,studio,mail,analytics,pooler > "$RUNNER_TEMP/supabase-start.log" 2>&1 || { echo 'Local Supabase failed to start; inspect runner service connectivity.'; exit 1; }
+          "$cli" status --env --output-format text > "$RUNNER_TEMP/supabase-local.env"
           set -a
           source "$RUNNER_TEMP/supabase-local.env"
           set +a
