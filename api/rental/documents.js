@@ -70,7 +70,7 @@ export default async function handler(req,res){
    // Reserve metadata first: a failed or uncertain Storage call remains traceable.
    const saved=await rows('rental_documents',{},'POST',{id:fileId,organization_id:org,lease_id:lease_id||null,property_id:property_id||null,uploaded_by:session.user_id,filename,storage_path:path,state:'pending'});
    if(saved.length!==1)throw Error('Metadata reservation failed');
-   await call('/storage/v1/object/'+bucket+'/'+path,'POST',bytes,{'content-type':mime_type,'x-upsert':'false','cache-control':'no-store'});
+   await call('/storage/v1/object/'+bucket+'/'+path,'POST',bytes,{'content-type':mime_type,'x-upsert':'false','cache-control':'max-age=0, no-store'});
    const ready=await rows('rental_documents',{id:fileId,organization_id:org,state:'pending'},'PATCH',{state:'ready'});
    if(ready.length!==1)throw Error('Metadata finalization failed');
    return res.status(201).json({item:{id:fileId,filename,lease_id:lease_id||null,property_id:property_id||null}});

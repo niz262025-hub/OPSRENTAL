@@ -63,7 +63,7 @@ test('partial failures retain metadata for retry and incomplete files cannot be 
   assert.equal((await req('GET','signed-url',{},doc.id)).code,409);assert.equal(signCalls,0);
   failDelete=false;failMetadataDelete=true;assert.equal((await req('DELETE','delete',{},doc.id)).code,503);assert.equal(doc.state,'deleting');
   failMetadataDelete=false;assert.equal((await req('DELETE','delete',{},doc.id)).code,200);assert.equal(doc,null);
-  assert.equal((await req('POST','upload',file)).code,201);assert.equal(doc.state,'ready');const signed=await req('GET','signed-url',{},doc.id);assert.equal(signed.code,200);assert.equal(signed.body.expires_in,60);assert.equal(signedExpires,60);assert.equal(uploadHeaders['cache-control'],'no-store');assert.equal(signed.headers['Cache-Control'],'private, no-store');
+  assert.equal((await req('POST','upload',file)).code,201);assert.equal(doc.state,'ready');const signed=await req('GET','signed-url',{},doc.id);assert.equal(signed.code,200);assert.equal(signed.body.expires_in,60);assert.equal(signedExpires,60);assert.equal(uploadHeaders['cache-control'],'max-age=0, no-store');assert.equal(signed.headers['Cache-Control'],'private, no-store');
   failDownload=true;assert.equal((await req('GET','download',{},doc.id)).code,503);assert.equal(doc.state,'ready');failDownload=false;assert.equal((await req('GET','download',{},doc.id)).code,200);
   role='tenant';assert.equal((await req('GET','signed-url',{},doc.id)).code,403);role='owner';revoked=true;assert.equal((await req('GET','signed-url',{},doc.id)).code,403);revoked=false;
   const foreign=response();await handler({method:'GET',headers,query:{organization_id:prop,action:'signed-url',id:doc.id}},foreign);assert.equal(foreign.code,403);
