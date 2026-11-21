@@ -56,6 +56,7 @@ jobs:
           set +a
           case "${API_URL:-}" in http://127.0.0.1:*|http://localhost:*) ;; *) echo 'Refusing non-loopback API'; exit 1;; esac
           test -n "${SERVICE_ROLE_KEY:-}"
-          "$cli" db query --file "$GITHUB_WORKSPACE/tests/storage-uat/fixture.sql" >/dev/null
+          node -e 'const u=new URL(process.env.DB_URL); if (!["localhost","127.0.0.1"].includes(u.hostname)) process.exit(1)'
+          psql "$DB_URL" -v ON_ERROR_STOP=1 --file "$GITHUB_WORKSPACE/tests/storage-uat/fixture.sql" >/dev/null
           cd "$GITHUB_WORKSPACE"
           node --test tests/storage-uat/real-storage.test.mjs
