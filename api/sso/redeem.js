@@ -1,4 +1,5 @@
 import { createPrivateKey, randomBytes, createHash, sign, createHmac } from "node:crypto";
+import { myopsOrigin } from './myops-origin.js';
 const TICKET = /^[A-Za-z0-9_-]{43}$/;
 function canonicalJson(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -43,7 +44,7 @@ export default async function handler(req, res) {
     const timeout = setTimeout(() => controller.abort(), 8000);
     let upstream;
     try {
-      upstream = await fetch("https://www.myops.com.my/api/app/redeem", {
+      upstream = await fetch(myopsOrigin() + "/api/app/redeem", {
         method: "POST", headers: signed.headers, body: JSON.stringify(signed.body), signal: controller.signal
       });
     } finally { clearTimeout(timeout); }
