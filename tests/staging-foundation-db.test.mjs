@@ -71,3 +71,24 @@ test('access rollback is guarded, repeatable and preserves rows, constraints and
     await assert.rejects(db.query('select * from public.rental_properties'), /permission denied/);
   } finally { await db.close(); }
 });
+
+test('database preserves dependent leases when a property deletion is attempted', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create role anon; create role authenticated; create schema auth;
+      create table auth.users(id uuid primary key);
+      create table public.myops_organizations(id uuid primary key);
+      set myops.allow_rental_staging='wengxxiqwtosirealghx';`);
+    const foundation = await readFile(new URL('../supabase/proposals/20261121104119_rental_staging_foundation.sql', import.meta.url), 'utf8');
+    await db.exec(foundation);
+    await db.exec(`insert into auth.users values('00000000-0000-4000-8000-000000000001');
+      insert into public.myops_organizations values('00000000-0000-4000-8000-000000000002');
+      insert into public.rental_properties(id,organization_id,name,address,created_by) values
+        ('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000002','Synthetic','Test','00000000-0000-4000-8000-000000000001');
+      insert into public.rental_leases(organization_id,property_id,tenant_user_id,monthly_rent,start_date) values
+        ('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001',1,'2026-01-01');`);
+    await assert.rejects(db.query("delete from public.rental_properties where id='00000000-0000-4000-8000-000000000003'"),/foreign key/);
+    assert.equal((await db.query('select count(*)::int as n from public.rental_leases')).rows[0].n,1);
+    assert.equal((await db.query('select count(*)::int as n from public.rental_properties')).rows[0].n,1);
+  } finally {await db.close()}
+});

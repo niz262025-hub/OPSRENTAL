@@ -14,17 +14,18 @@ test('API requires active central session and membership, and rejects foreign pr
  const body=Buffer.from(JSON.stringify({sid,exp:Date.now()+60000})).toString('base64url');
  const mac=createHmac('sha256',process.env.MYOPS_RENTAL_SESSION_SECRET).update(body).digest('base64url');
  const headers={cookie:`__Host-opsrental-session=${body}.${mac}`,origin:'https://rental.example',host:'rental.example'};
- let revoked=false, entitled=true, active=true, extraMembership=false, writes=[];
+ let revoked=false, entitled=true, active=true, extraMembership=false, role='manager', writes=[];
  globalThis.fetch=async (url,options={})=>{
   const u=new URL(url);
   if(u.pathname==='/api/app/entitlement')return {ok:true,json:async()=>({entitled,session_active:!revoked})};
   const table=u.pathname.split('/').pop();
   let rows=[];
   if(table==='myops_app_sessions')rows=[{id:sid,user_id:user,product_slug:'opsrental',revoked_at:revoked?'2026-01-01':null}];
-  if(table==='myops_memberships'&&active){ rows=[{user_id:user,organization_id:orgA,status:'active',role:'manager'}]; if(extraMembership)rows.push({user_id:user,organization_id:orgB,status:'active',role:'manager'}); if(u.searchParams.get('organization_id'))rows=rows.filter(m=>u.searchParams.get('organization_id')===`eq.${m.organization_id}`); }
+  if(table==='myops_memberships'&&active){ rows=[{user_id:user,organization_id:orgA,status:'active',role}]; if(extraMembership)rows.push({user_id:user,organization_id:orgB,status:'active',role:'manager'}); if(u.searchParams.get('organization_id'))rows=rows.filter(m=>u.searchParams.get('organization_id')===`eq.${m.organization_id}`); }
   if(table==='myops_app_grants') rows=[{user_id:user,organization_id:orgA,product_slug:'opsrental'}];
   if(table==='myops_subscriptions') rows=[{organization_id:orgA,personal_user_id:null,status:'active',product_slug:'opsrental',current_period_end:null}];
   if(table==='rental_properties')rows=u.searchParams.get('organization_id')===`eq.${orgA}`?[{id:property,organization_id:orgA}]:[];
+  if(options.method==='DELETE'){writes.push({table,method:options.method,filters:Object.fromEntries(u.searchParams)});return {ok:true,json:async()=>u.searchParams.get('organization_id')===`eq.${orgA}`?[{id:property}]:[]};}
   if(options.method==='POST'||options.method==='PATCH'){writes.push({table,method:options.method,body:JSON.parse(options.body)});return {ok:true,json:async()=>[JSON.parse(options.body)]};}
   return {ok:true,json:async()=>rows};
  };
@@ -39,9 +40,14 @@ test('API requires active central session and membership, and rejects foreign pr
   extraMembership=true;
   assert.equal((await post(orgB,{property_id:property,tenant_user_id:user,monthly_rent:1,start_date:'2026-01-01'},'leases')).statusCode,403);
   extraMembership=false;
+  const del=async(org)=>{const res=response();await write({method:'DELETE',headers,query:{resource:'properties',organization_id:org,id:property}},res);return res};
+  assert.equal((await del(orgA)).statusCode,403);
+  role='owner';assert.equal((await del(orgA)).statusCode,200);
+  assert.equal(writes[1].filters.organization_id,`eq.${orgA}`);
+  assert.equal((await del(orgB)).statusCode,403);
   active=false;assert.equal((await get(orgA)).statusCode,403);active=true;
   entitled=false;assert.equal((await get(orgA)).statusCode,403);entitled=true;
   revoked=true;assert.equal((await get(orgA)).statusCode,403);
-  assert.equal(writes.length,1);
+  assert.equal(writes.length,2);
  } finally {globalThis.fetch=originalFetch;process.env=old;}
 });

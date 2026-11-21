@@ -21,7 +21,8 @@ async function fixture(records=seed()){
   if(u.pathname==='/api/rental/organizations')return {ok:true,json:async()=>({organizations:[{organization_id:org,role:'owner'}]})};
   if(u.pathname==='/api/rental/data')return {ok:true,json:async()=>({items:records[u.searchParams.get('resource')]||[]})};
   if(u.pathname==='/api/rental/write'){
-   const resource=u.searchParams.get('resource'),body=JSON.parse(options.body);
+   const resource=u.searchParams.get('resource'),body=options.body?JSON.parse(options.body):{};
+   if(options.method==='DELETE'){records[resource]=records[resource].filter(x=>x.id!==u.searchParams.get('id'));return {ok:true,json:async()=>({deleted:true})};}
    if(options.method==='POST'){const id='123e4567-e89b-42d3-a456-426614174099';records[resource].push({id,...body});}
    else {const item=records[resource].find(x=>x.id===u.searchParams.get('id'));Object.assign(item,body);}
    return {ok:true,json:async()=>({item:body})};
@@ -80,5 +81,15 @@ test('browser localStorage is ignored and empty remote portfolios remain empty',
   dom.window.localStorage.setItem('haven-rental-data-v1','{bad');
   assert.equal(dom.window.document.querySelectorAll('#properties-table tr').length,0);
   assert.equal(dom.window.document.querySelectorAll('#payments-table tr').length,0);
+ }finally{dom.window.close();}
+});
+
+test('owner can cancel or confirm property deletion',async()=>{
+ const {dom,calls,records}=await fixture();try{
+  const button=dom.window.document.querySelector('[data-delete-property]');assert.ok(button);
+  dom.window.confirm=()=>false;button.click();await new Promise(r=>setTimeout(r,10));
+  assert.equal(calls.filter(x=>x.method==='DELETE').length,0);
+  dom.window.confirm=()=>true;button.click();await new Promise(r=>setTimeout(r,35));
+  assert.equal(calls.filter(x=>x.method==='DELETE').length,1);assert.equal(records.properties.length,0);
  }finally{dom.window.close();}
 });

@@ -20,7 +20,7 @@ async function query(table, filters={},method="GET",body) {
 export default async function handler(req,res){
  res.setHeader("Cache-Control","private, no-store");
   if (rentalAccessDisabled()) return res.status(503).json({error:"Rental access temporarily disabled"});
- if(!["POST","PATCH"].includes(req.method))return res.status(405).json({error:"Method not allowed"});
+ if(!["POST","PATCH","DELETE"].includes(req.method))return res.status(405).json({error:"Method not allowed"});
  const origin=req.headers.origin,host=req.headers.host;
  if(!origin||!host)return res.status(403).json({error:"Same-origin request required"});
  try { const u=new URL(origin);if(u.protocol!=="https:"||u.host!==host||u.username||u.password)return res.status(403).json({error:"Origin denied"}); }catch{return res.status(403).json({error:"Origin denied"});}
@@ -36,6 +36,14 @@ export default async function handler(req,res){
   const membership=await query("myops_memberships",{user_id:session.user_id,organization_id:org,status:"active"});
   if(!membership.some(m=>["owner","admin","manager"].includes(m.role)))return res.status(403).json({error:"Manager role required"});
   if(!(await organizationEntitled(query,session.user_id,org)))return res.status(403).json({error:"Organization entitlement denied"});
+  if(req.method==="DELETE") {
+   if(!membership.some(m=>["owner","admin"].includes(m.role)))return res.status(403).json({error:"Owner or administrator required"});
+   const id=req.query?.id;
+   if(typeof id!=="string"||!uuid.test(id))return res.status(400).json({error:"Record ID required"});
+   const rows=await query(table,{id,organization_id:org},"DELETE");
+   if(!rows.length)return res.status(404).json({error:"Not found"});
+   return res.status(200).json({deleted:true});
+  }
   const input=req.body;
   if(!input||typeof input!=="object"||Array.isArray(input)||!Object.keys(input).length||Object.keys(input).some(k=>!fields[resource].includes(k)))return res.status(400).json({error:"Invalid fields"});
   for(const k of ["property_id","lease_id","tenant_user_id"])if(k in input&&!uuid.test(input[k]))return res.status(400).json({error:"Invalid reference"});

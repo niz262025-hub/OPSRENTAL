@@ -27,6 +27,7 @@ const initialData = {
 const clone = (value) => JSON.parse(JSON.stringify(value));
 let data = {properties:[],tenancies:[],payments:[],tickets:[]};
 let rentalOrganizationId = null;
+let rentalOrganizationRole = null;
 let toastTimer;
 
 // Server records are authoritative. Never fall back to demo data or browser storage.
@@ -41,6 +42,7 @@ async function loadRemoteData() {
   if(!Array.isArray(orgs.organizations) || !orgs.organizations.length) throw new Error("No authorized MYOPS organization");
   const org = orgs.organizations.find(x=>["owner","admin","manager"].includes(x.role)) || orgs.organizations[0];
   rentalOrganizationId = org.organization_id;
+  rentalOrganizationRole = org.role;
   const resources = ["properties","leases","payments","tickets"];
   const results = await Promise.all(resources.map(resource=>rentalGet("/api/rental/data?resource="+resource+"&organization_id="+encodeURIComponent(rentalOrganizationId))));
   const [properties,leases,payments,tickets] = results.map(r=>r.items || []);
@@ -170,7 +172,7 @@ function renderProperties() {
   document.getElementById("properties-table").innerHTML = data.properties.map((property) => {
     const tenants = occupied.filter((tenancy) => tenancy.propertyId === property.id);
     const rent = tenants.reduce((sum, tenancy) => sum + Number(tenancy.rent), 0);
-    return `<tr><td><strong>${escapeHTML(property.name)}</strong></td><td>${escapeHTML(property.address)}, ${escapeHTML(property.city)}</td><td>${property.units}</td><td>${tenants.length} / ${property.units} occupied</td><td>${money(rent)} <small>per month</small></td></tr>`;
+    return `<tr><td><strong>${escapeHTML(property.name)}</strong></td><td>${escapeHTML(property.address)}, ${escapeHTML(property.city)}</td><td>${property.units}</td><td>${tenants.length} / ${property.units} occupied</td><td>${money(rent)} <small>per month</small></td><td>${["owner","admin"].includes(rentalOrganizationRole) ? `<button type="button" data-delete-property="${escapeHTML(property.id)}">Delete</button>` : ""}</td></tr>`;
   }).join("");
   setTableState("properties-table", "properties-empty", !data.properties.length);
 }
@@ -321,6 +323,19 @@ document.getElementById("ticket-form").addEventListener("submit",event=>handleRe
  const statusMap={"Open":"open","In progress":"in_progress","Resolved":"resolved"};
  return {lease_id,title:String(f.get("title")||"").trim(),description:String(f.get("description")||"").trim(),status:statusMap[f.get("status")]||"open"};
 },"ticket-dialog"));
+document.addEventListener("click",async event=>{
+ const button=event.target.closest("[data-delete-property]");
+ if(!button || !rentalOrganizationId || !["owner","admin"].includes(rentalOrganizationRole))return;
+ if(!window.confirm("Delete this property? This cannot be undone."))return;
+ button.disabled=true;
+ try {
+  const params=new URLSearchParams({resource:"properties",organization_id:rentalOrganizationId,id:button.dataset.deleteProperty});
+  const response=await fetch("/api/rental/write?"+params,{method:"DELETE",credentials:"same-origin"});
+  const result=await response.json();if(!response.ok)throw Error(result.error||"Unable to delete property.");
+  await loadRemoteData();notify("Property deleted.");
+ } catch(error) {notify(error.message||"Unable to delete property.");}
+ finally {button.disabled=false;}
+});
 document.addEventListener("click",async event=>{
  const button=event.target.closest("[data-mark-paid]");
  if(!button)return;
