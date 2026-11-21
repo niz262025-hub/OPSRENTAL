@@ -53,6 +53,7 @@ async function loadRemoteData() {
     tickets:tickets.map(t=>({id:t.id,title:t.title,propertyId:leases.find(l=>l.id===t.lease_id)?.property_id||"",tenancyId:t.lease_id,priority:"Normal",status:t.status==="in_progress"?"In progress":t.status==="resolved"||t.status==="closed"?"Resolved":"Open",description:t.description||"",createdAt:(t.created_at||"").slice(0,10)}))
   };
   render();
+  document.dispatchEvent(new Event('rental-data-ready'));
 }
 function escapeHTML(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({

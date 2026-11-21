@@ -3,16 +3,26 @@ import { parseCookie, checkEntitlement } from '../sso/session.js';
 import { rentalDatabaseUrl } from './db-config.js';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX=5*1024*1024;
+// Base64 and JSON must fit within Vercel's request limit.
+const MAX=3*1024*1024;
+export const config = { api: { bodyParser: { sizeLimit: '4.25mb' } } };
+function validSignature(bytes, type) {
+ if (type === 'application/pdf') return bytes.subarray(0,5).equals(Buffer.from('%PDF-'));
+ if (type === 'image/png') return bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+ if (type === 'image/jpeg') return bytes.length >= 4 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 && bytes[bytes.length-2] === 255 && bytes[bytes.length-1] === 217;
+ if (type === 'text/plain') { try { const text = new TextDecoder('utf-8', {fatal:true}).decode(bytes); return !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text); } catch { return false; } }
+ return false;
+}
 const MIME=new Set(['application/pdf','image/png','image/jpeg','text/plain']);
 const bucket='opsrental-private';
-function config(){const base=rentalDatabaseUrl(),key=process.env.MYOPS_RENTAL_SERVICE_ROLE_KEY;if(!key)throw Error('Configuration missing');return {base,key};}
+function backendConfig(){const base=rentalDatabaseUrl(),key=process.env.MYOPS_RENTAL_SERVICE_ROLE_KEY;if(!key)throw Error('Configuration missing');return {base,key};}
 async function call(path,method='GET',body,headers={}) {
- const {base,key}=config();
+ const {base,key}=backendConfig();
  const response=await fetch(new URL(path,base),{method,headers:{apikey:key,Authorization:'Bearer '+key,...headers},body,redirect:'error',cache:'no-store',signal:AbortSignal.timeout(12000)});
  if(!response.ok)throw Error('Backend operation failed: '+response.status);
  return response;
 }
+async function removeObject(path){ return call('/storage/v1/object/'+bucket,'DELETE',JSON.stringify({prefixes:[path]}),{'content-type':'application/json'}); }
 async function rows(table,filters={},method='GET',payload){
  const q=new URLSearchParams({select:'*'});for(const [k,v] of Object.entries(filters))q.set(k,'eq.'+v);
  const r=await call('/rest/v1/'+table+'?'+q,method,payload===undefined?undefined:JSON.stringify(payload),{'content-type':'application/json',Prefer:'return=representation'});
@@ -40,31 +50,39 @@ export default async function handler(req,res){
   const id=req.query?.id,action=req.query?.action||'list';
   if(req.method==='GET'&&action==='list'){
    const docs=await rows('rental_documents',{organization_id:org});
-   return res.status(200).json({items:docs.map(d=>({id:d.id,filename:d.filename,lease_id:d.lease_id,created_at:d.created_at}))});
+   return res.status(200).json({items:docs.map(d=>({id:d.id,filename:d.filename,lease_id:d.lease_id,property_id:d.property_id,created_at:d.created_at}))});
   }
   if(req.method==='POST'&&action==='upload'){
-   const {lease_id,filename,mime_type,content_base64}=req.body||{};
-   if(!UUID.test(lease_id||'')||typeof filename!=='string'||filename.length>180||!filename.trim()||/[\\/\x00-\x1f]/.test(filename)||!MIME.has(mime_type)||typeof content_base64!=='string'||content_base64.length>Math.ceil(MAX*4/3)+8||!/^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content_base64))return deny(res,400,'Invalid file');
+   const {lease_id,property_id,filename,mime_type,content_base64}=req.body||{};
+   if((!UUID.test(lease_id||'') === !UUID.test(property_id||''))||typeof filename!=='string'||filename.length>180||!filename.trim()||/[\\/\x00-\x1f]/.test(filename)||!MIME.has(mime_type)||typeof content_base64!=='string'||content_base64.length>Math.ceil(MAX*4/3)+8||!/^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content_base64))return deny(res,400,'Invalid file');
    const bytes=Buffer.from(content_base64,'base64');
-   if(!bytes.length||bytes.length>MAX)return deny(res,413,'File size exceeds 5 MB');
-   if(!(await rows('rental_leases',{id:lease_id,organization_id:org})).length)return deny(res,403,'Lease not in organization');
+   if(!bytes.length||bytes.length>MAX)return deny(res,413,'File size exceeds 3 MB');
+   if(!validSignature(bytes,mime_type))return deny(res,400,'File content does not match its type');
+   const target = lease_id ? ['rental_leases',lease_id] : ['rental_properties',property_id];
+   if(!(await rows(target[0],{id:target[1],organization_id:org})).length)return deny(res,403,'Association not in organization');
+   const bucketInfo=await (await call('/storage/v1/bucket/'+bucket)).json();
+   if(bucketInfo.id!==bucket || bucketInfo.public!==false)return deny(res,503,'Private storage unavailable');
    const fileId=crypto.randomUUID(),path=org+'/'+fileId;
    await call('/storage/v1/object/'+bucket+'/'+path,'POST',bytes,{'content-type':mime_type,'x-upsert':'false'});
    try{
-    const saved=await rows('rental_documents',{},'POST',{id:fileId,organization_id:org,lease_id,uploaded_by:session.user_id,filename,storage_path:path});
+    const saved=await rows('rental_documents',{},'POST',{id:fileId,organization_id:org,lease_id:lease_id||null,property_id:property_id||null,uploaded_by:session.user_id,filename,storage_path:path});
     return res.status(201).json({item:{id:saved[0].id,filename:saved[0].filename,lease_id:saved[0].lease_id}});
-   }catch(e){await call('/storage/v1/object/'+bucket+'/'+path,'DELETE').catch(()=>{});throw e;}
+   }catch(e){await removeObject(path).catch(()=>console.error('Document upload cleanup failed'));throw e;}
   }
   if(!UUID.test(id||''))return deny(res,400,'Document ID required');
   const docs=await rows('rental_documents',{id,organization_id:org});
   if(!docs.length)return deny(res,404,'Document not found');
   const doc=docs[0];
-  if(!doc.storage_path.startsWith(org+'/'))return deny(res,403,'Invalid storage ownership');
+  const bucketInfo=await (await call('/storage/v1/bucket/'+bucket)).json();
+  if(bucketInfo.id!==bucket || bucketInfo.public!==false)return deny(res,503,'Private storage unavailable');
+  if(doc.storage_path !== org+'/'+doc.id)return deny(res,403,'Invalid storage ownership');
   if(req.method==='GET'&&action==='signed-url'){
    const r=await call('/storage/v1/object/sign/'+bucket+'/'+doc.storage_path,'POST',JSON.stringify({expiresIn:60}),{'content-type':'application/json'});
    const signed=await r.json();
    if(!signed.signedURL)return deny(res,503,'Signed URL unavailable');
-   return res.status(200).json({url:new URL(signed.signedURL,config().base).toString(),expires_in:60});
+   const signedPath = signed.signedURL.startsWith('/storage/v1/') ? signed.signedURL : '/storage/v1'+signed.signedURL;
+   if(!signedPath.startsWith('/storage/v1/object/sign/'+bucket+'/'+doc.storage_path+'?'))return deny(res,503,'Invalid signed URL');
+   return res.status(200).json({url:new URL(signedPath,backendConfig().base).toString(),expires_in:60});
   }
   if(req.method==='GET'&&action==='download'){
    const r=await call('/storage/v1/object/authenticated/'+bucket+'/'+doc.storage_path);
@@ -75,7 +93,7 @@ export default async function handler(req,res){
   }
   if(req.method==='DELETE'&&action==='delete'){
    if(!['owner','admin'].includes(role))return deny(res,403,'Owner or administrator required');
-   await call('/storage/v1/object/'+bucket+'/'+doc.storage_path,'DELETE');
+   await removeObject(doc.storage_path);
    await rows('rental_documents',{id,organization_id:org},'DELETE');
    return res.status(200).json({deleted:true});
   }
