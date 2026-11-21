@@ -50,12 +50,16 @@ export default async function handler(req,res){
   const id=req.query?.id,action=req.query?.action||'list';
   if(req.method==='GET'&&action==='list'){
    const docs=await rows('rental_documents',{organization_id:org});
-   return res.status(200).json({items:docs.map(d=>({id:d.id,filename:d.filename,lease_id:d.lease_id,property_id:d.property_id,created_at:d.created_at}))});
+   return res.status(200).json({items:docs.map(d=>({id:d.id,filename:d.filename,lease_id:d.lease_id,property_id:d.property_id,state:d.state,created_at:d.created_at}))});
   }
   if(req.method==='POST'&&action==='upload'){
    const {lease_id,property_id,filename,mime_type,content_base64}=req.body||{};
-   if((!UUID.test(lease_id||'') === !UUID.test(property_id||''))||typeof filename!=='string'||filename.length>180||!filename.trim()||/[\\/\x00-\x1f]/.test(filename)||!MIME.has(mime_type)||typeof content_base64!=='string'||content_base64.length>Math.ceil(MAX*4/3)+8||!/^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content_base64))return deny(res,400,'Invalid file');
+   if((!UUID.test(lease_id||'') === !UUID.test(property_id||''))||typeof filename!=='string'||filename.length>180||!filename.trim()||/[\\/\x00-\x1f]/.test(filename)||!MIME.has(mime_type)||typeof content_base64!=='string')return deny(res,400,'Invalid file');
+   if(content_base64.length>Math.ceil(MAX/3)*4)return deny(res,413,'File size exceeds 3 MB');
+   // Avoid a repeated-group regexp, which can overflow the stack on valid large uploads.
+   if(content_base64.length%4!==0 || /[^A-Za-z0-9+/=]/.test(content_base64))return deny(res,400,'Invalid file');
    const bytes=Buffer.from(content_base64,'base64');
+   if(bytes.toString('base64')!==content_base64)return deny(res,400,'Invalid file');
    if(!bytes.length||bytes.length>MAX)return deny(res,413,'File size exceeds 3 MB');
    if(!validSignature(bytes,mime_type))return deny(res,400,'File content does not match its type');
    const target = lease_id ? ['rental_leases',lease_id] : ['rental_properties',property_id];
@@ -63,11 +67,13 @@ export default async function handler(req,res){
    const bucketInfo=await (await call('/storage/v1/bucket/'+bucket)).json();
    if(bucketInfo.id!==bucket || bucketInfo.public!==false)return deny(res,503,'Private storage unavailable');
    const fileId=crypto.randomUUID(),path=org+'/'+fileId;
-   await call('/storage/v1/object/'+bucket+'/'+path,'POST',bytes,{'content-type':mime_type,'x-upsert':'false'});
-   try{
-    const saved=await rows('rental_documents',{},'POST',{id:fileId,organization_id:org,lease_id:lease_id||null,property_id:property_id||null,uploaded_by:session.user_id,filename,storage_path:path});
-    return res.status(201).json({item:{id:saved[0].id,filename:saved[0].filename,lease_id:saved[0].lease_id}});
-   }catch(e){await removeObject(path).catch(()=>console.error('Document upload cleanup failed'));throw e;}
+   // Reserve metadata first: a failed or uncertain Storage call remains traceable.
+   const saved=await rows('rental_documents',{},'POST',{id:fileId,organization_id:org,lease_id:lease_id||null,property_id:property_id||null,uploaded_by:session.user_id,filename,storage_path:path,state:'pending'});
+   if(saved.length!==1)throw Error('Metadata reservation failed');
+   await call('/storage/v1/object/'+bucket+'/'+path,'POST',bytes,{'content-type':mime_type,'x-upsert':'false','cache-control':'no-store'});
+   const ready=await rows('rental_documents',{id:fileId,organization_id:org,state:'pending'},'PATCH',{state:'ready'});
+   if(ready.length!==1)throw Error('Metadata finalization failed');
+   return res.status(201).json({item:{id:fileId,filename,lease_id:lease_id||null,property_id:property_id||null}});
   }
   if(!UUID.test(id||''))return deny(res,400,'Document ID required');
   const docs=await rows('rental_documents',{id,organization_id:org});
@@ -76,6 +82,7 @@ export default async function handler(req,res){
   const bucketInfo=await (await call('/storage/v1/bucket/'+bucket)).json();
   if(bucketInfo.id!==bucket || bucketInfo.public!==false)return deny(res,503,'Private storage unavailable');
   if(doc.storage_path !== org+'/'+doc.id)return deny(res,403,'Invalid storage ownership');
+  if(req.method==='GET'&&doc.state!=='ready')return deny(res,409,'Document is not available');
   if(req.method==='GET'&&action==='signed-url'){
    const r=await call('/storage/v1/object/sign/'+bucket+'/'+doc.storage_path,'POST',JSON.stringify({expiresIn:60}),{'content-type':'application/json'});
    const signed=await r.json();
@@ -93,8 +100,15 @@ export default async function handler(req,res){
   }
   if(req.method==='DELETE'&&action==='delete'){
    if(!['owner','admin'].includes(role))return deny(res,403,'Owner or administrator required');
+   if(doc.state==='pending' && (!Number.isFinite(Date.parse(doc.created_at)) || Date.now()-Date.parse(doc.created_at)<120000))return deny(res,409,'Upload may still be in progress');
+   if(!['pending','ready','deleting'].includes(doc.state))return deny(res,409,'Invalid document state');
+   if(doc.state!=='deleting'){
+    const marked=await rows('rental_documents',{id,organization_id:org,state:doc.state},'PATCH',{state:'deleting'});
+    if(marked.length!==1)return deny(res,409,'Document changed, retry');
+   }
    await removeObject(doc.storage_path);
-   await rows('rental_documents',{id,organization_id:org},'DELETE');
+   const removed=await rows('rental_documents',{id,organization_id:org,state:'deleting'},'DELETE');
+   if(removed.length!==1)throw Error('Metadata deletion failed');
    return res.status(200).json({deleted:true});
   }
   return deny(res,400,'Unsupported document operation');

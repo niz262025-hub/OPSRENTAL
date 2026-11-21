@@ -19,7 +19,49 @@ test('document API checks signatures, organization, session and private bucket b
   if(table==='myops_subscriptions')rows=[{organization_id:org,status:'active',product_slug:'opsrental',personal_user_id:null}];
   if(table==='rental_properties'&&u.searchParams.get('id')===`eq.${prop}`)rows=[{id:prop}];
   if(table==='rental_documents'&&opt.method==='POST')rows=[JSON.parse(opt.body)];
+  if(table==='rental_documents'&&opt.method==='PATCH')rows=[{...JSON.parse(opt.body)}];
   return {ok:true,json:async()=>rows};};
  const upload=async(content,type='application/pdf',organization_id=org,property_id=prop)=>{const res=response();await handler({method:'POST',headers,query:{organization_id,action:'upload'},body:{property_id,filename:'test.pdf',mime_type:type,content_base64:Buffer.from(content).toString('base64')}},res);return res};
  try{assert.equal((await upload('fake')).code,400);assert.equal(storageWrites,0);assert.equal((await upload('%PDF-synthetic','application/pdf',prop)).code,403);publicBucket=true;assert.equal((await upload('%PDF-synthetic')).code,503);assert.equal(storageWrites,0);publicBucket=false;assert.equal((await upload('%PDF-synthetic')).code,201);assert.equal(storageWrites,1);revoked=true;assert.equal((await upload('%PDF-synthetic')).code,403);process.env.MYOPS_RENTAL_ACCESS_DISABLED='true';assert.equal((await upload('%PDF-synthetic')).code,503);}finally{globalThis.fetch=fetch0;process.env=old;}
+});
+
+test('partial failures retain metadata for retry and incomplete files cannot be signed',async()=>{
+ const old={...process.env},original=globalThis.fetch,{privateKey}=generateKeyPairSync('ed25519');
+ Object.assign(process.env,{VERCEL_ENV:'preview',MYOPS_API_ORIGIN:'https://southerndotcom-website-git-feat-myop-ca0019-mohd-syaiful-nizam1.vercel.app',MYOPS_RENTAL_SUPABASE_URL:'https://wengxxiqwtosirealghx.supabase.co',MYOPS_RENTAL_SERVICE_ROLE_KEY:'test',MYOPS_RENTAL_SESSION_SECRET:'synthetic-secret-12345678901234567890',MYOPS_APP_PRIVATE_KEY:privateKey.export({type:'pkcs8',format:'pem'}).toString()});
+ const body=Buffer.from(JSON.stringify({sid,exp:Date.now()+60000})).toString('base64url'),mac=createHmac('sha256',process.env.MYOPS_RENTAL_SESSION_SECRET).update(body).digest('base64url');
+ const headers={cookie:`__Host-opsrental-session=${body}.${mac}`,origin:'https://rental.example',host:'rental.example'};
+ let doc=null, bucketMissing=false, failUpload=false,failDelete=false,failMetadataDelete=false,failMetadataInsert=false,signCalls=0,storageUploads=0;
+ const ok=payload=>({ok:true,json:async()=>payload});
+ globalThis.fetch=async(url,opt={})=>{const u=new URL(url),t=u.pathname.split('/').pop(),method=opt.method||'GET';
+  if(u.pathname==='/api/app/entitlement')return ok({entitled:true,session_active:true});
+  if(u.pathname==='/storage/v1/bucket/opsrental-private')return bucketMissing?{ok:false,status:404}:ok({id:'opsrental-private',public:false});
+  if(u.pathname.startsWith('/storage/v1/object/sign/')){signCalls++;return ok({signedURL:'/object/sign/opsrental-private/'+doc.storage_path+'?token=test'});}
+  if(u.pathname==='/storage/v1/object/opsrental-private'&&method==='DELETE')return failDelete?{ok:false,status:500}:ok([]);
+  if(u.pathname.startsWith('/storage/v1/object/opsrental-private/')&&method==='POST'){storageUploads++;return failUpload?{ok:false,status:500}:ok({});}
+  if(t==='myops_app_sessions')return ok([{user_id:user,revoked_at:null,product_slug:'opsrental'}]);
+  if(t==='myops_memberships')return ok([{role:'owner'}]);
+  if(t==='myops_app_grants')return ok([{user_id:user,organization_id:org,product_slug:'opsrental'}]);
+  if(t==='myops_subscriptions')return ok([{organization_id:org,status:'active',product_slug:'opsrental',personal_user_id:null}]);
+  if(t==='rental_properties')return ok([{id:prop}]);
+  if(t==='rental_documents'){
+   if(method==='POST'){if(failMetadataInsert)return {ok:false,status:500};doc={...JSON.parse(opt.body),created_at:new Date(Date.now()-180000).toISOString()};return ok([doc]);}
+   if(method==='PATCH'){if(!doc||u.searchParams.get('state')!=='eq.'+doc.state)return ok([]);doc={...doc,...JSON.parse(opt.body)};return ok([doc]);}
+   if(method==='DELETE'){if(failMetadataDelete)return {ok:false,status:500};const d=doc;doc=null;return ok([d]);}
+   return ok(doc?[doc]:[]);
+  } return ok([]);
+ };
+ const req=async(method,action,payload={},id)=>{const res=response();await handler({method,headers,query:{organization_id:org,action,...(id?{id}:{})},body:payload},res);return res};
+ const file={property_id:prop,filename:'test.pdf',mime_type:'application/pdf',content_base64:Buffer.from('%PDF-example').toString('base64')};
+ try{
+  assert.ok([400,413].includes((await req('POST','upload',{...file,content_base64:Buffer.alloc(3*1024*1024+1).toString('base64')})).code));
+  failMetadataInsert=true;assert.equal((await req('POST','upload',file)).code,503);assert.equal(storageUploads,0);failMetadataInsert=false;
+  bucketMissing=true;assert.equal((await req('POST','upload',file)).code,503);assert.equal(doc,null);assert.equal(storageUploads,0);bucketMissing=false;
+  failUpload=true;assert.equal((await req('POST','upload',file)).code,503);assert.equal(doc.state,'pending');
+  assert.equal((await req('GET','signed-url',{},doc.id)).code,409);assert.equal(signCalls,0);
+  failUpload=false;failDelete=true;assert.equal((await req('DELETE','delete',{},doc.id)).code,503);assert.equal(doc.state,'deleting');
+  assert.equal((await req('GET','signed-url',{},doc.id)).code,409);assert.equal(signCalls,0);
+  failDelete=false;failMetadataDelete=true;assert.equal((await req('DELETE','delete',{},doc.id)).code,503);assert.equal(doc.state,'deleting');
+  failMetadataDelete=false;assert.equal((await req('DELETE','delete',{},doc.id)).code,200);assert.equal(doc,null);
+  assert.equal((await req('POST','upload',file)).code,201);assert.equal(doc.state,'ready');const signed=await req('GET','signed-url',{},doc.id);assert.equal(signed.code,200);assert.equal(signed.body.expires_in,60);
+ }finally{globalThis.fetch=original;process.env=old;}
 });

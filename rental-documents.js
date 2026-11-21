@@ -12,7 +12,7 @@
   const endpoint='/api/rental/documents';
   function org(){return typeof rentalOrganizationId==='string'?rentalOrganizationId:null;}
   function url(action,extra=''){return endpoint+'?organization_id='+encodeURIComponent(org())+'&action='+action+extra;}
-  async function request(path,options={}){const r=await fetch(path,{credentials:'same-origin',cache:'no-store',...options});const data=await r.json();if(!r.ok)throw Error(data.error||'Document operation failed');return data;}
+  async function request(path,options={}){const r=await fetch(path,{credentials:'same-origin',cache:'no-store',...options});let data={};try{data=await r.json();}catch{}if(!r.ok)throw Error(data.error||'Document operation failed');return data;}
   function status(text){message.textContent=text;}
   async function refresh(){
    if(!org())return;
@@ -24,9 +24,9 @@
     if(!result.items.length){list.textContent='No documents uploaded.';return;}
     for(const item of result.items){
      const line=document.createElement('div');line.style.cssText='display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:10px 0';
-     const name=document.createElement('span');name.textContent=item.filename+' — '+(item.property_id ? propertyName(item.property_id) : 'Tenancy: '+propertyName(data.tenancies.find(t=>t.id===item.lease_id)?.propertyId));
+     const name=document.createElement('span');name.textContent=item.filename+(item.state==='ready'?'':' ('+(item.state==='pending'?'upload incomplete':'deletion incomplete')+')')+' — '+(item.property_id ? propertyName(item.property_id) : 'Tenancy: '+propertyName(data.tenancies.find(t=>t.id===item.lease_id)?.propertyId));
      line.append(name);
-     for(const action of ['View','Download','Delete']){
+     for(const action of (item.state==='ready'?['View','Download','Delete']:['Delete'])){
       const button=document.createElement('button');button.type='button';button.textContent=action;
       button.addEventListener('click',async()=>{
        try{
@@ -37,7 +37,7 @@
         if(action==='View'){
          const preview=window.open('about:blank','_blank');
          if(!preview)throw Error('Allow pop-ups to view documents');
-         let result; try { result==await request(url('signed-url','&id='+encodeURIComponent(item.id))); } catch (err) { preview.close(); throw err; }
+         let result; try { result=await request(url('signed-url','&id='+encodeURIComponent(item.id))); } catch (err) { preview.close(); throw err; }
          preview.opener=null;preview.location.replace(result.url);return;
         }
         const r=await fetch(url('download','&id='+encodeURIComponent(item.id)),{credentials:'same-origin',cache:'no-store'});
@@ -58,9 +58,9 @@
    try{
     const base64=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(Error('Read failed'));reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.readAsDataURL(f);});
     const [kind,id]=select.value.split(':');
-    await new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST',url('upload'));xhr.setRequestHeader('Content-Type','application/json');xhr.upload.onprogress=e=>{if(e.lengthComputable)progress.value=Math.round(e.loaded/e.total*100);};xhr.onerror=()=>reject(Error('Upload connection failed'));xhr.onload=()=>{let result={};try{result=JSON.parse(xhr.responseText);}catch{} if(xhr.status>=200&&xhr.status<300)resolve(result);else reject(Error(result.error||'Upload failed'));};xhr.send(JSON.stringify({[kind==='lease'?'lease_id':'property_id']:id,filename:f.name,mime_type:f.type,content_base64:base64}));});
+    await new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST',url('upload'));xhr.setRequestHeader('Content-Type','application/json');xhr.upload.onprogress=e=>{if(e.lengthComputable)progress.value=Math.round(e.loaded/e.total*100);};xhr.onerror=()=>reject(Error('Upload connection failed; check the document list before retrying'));xhr.onabort=()=>reject(Error('Upload cancelled; check the document list before retrying'));xhr.onload=()=>{let result={};try{result=JSON.parse(xhr.responseText);}catch{} if(xhr.status>=200&&xhr.status<300)resolve(result);else reject(Error(result.error||'Upload failed'));};xhr.send(JSON.stringify({[kind==='lease'?'lease_id':'property_id']:id,filename:f.name,mime_type:f.type,content_base64:base64}));});
     progress.value=100;file.value='';status('Document uploaded successfully.');await refresh();
-   }catch(e){status(e.message);}finally{button.disabled=false;setTimeout(()=>{progress.hidden=true;},1500);}
+   }catch(e){status(e.message+' Check the document list before retrying.');await refresh();}finally{button.disabled=false;setTimeout(()=>{progress.hidden=true;},1500);}
   });
   document.addEventListener('rental-data-ready',refresh);
   const watcher=setInterval(()=>{if(org() && data.properties.length + data.tenancies.length > 0){clearInterval(watcher);refresh();}},500);

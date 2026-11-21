@@ -12,6 +12,8 @@ do $$ begin
 end $$;
 alter table public.rental_documents alter column lease_id drop not null;
 alter table public.rental_documents add column if not exists property_id uuid;
+alter table public.rental_documents add column if not exists state text not null default 'ready' check (state in ('pending','ready','deleting'));
+-- Pending and deleting rows retain paths for safe retry after partial failures.
 alter table public.rental_documents add constraint rental_documents_property_org_fk
  foreign key(property_id,organization_id) references public.rental_properties(id,organization_id);
 alter table public.rental_documents add constraint rental_documents_one_association
@@ -26,4 +28,5 @@ create unique index if not exists rental_documents_path_unique_idx on public.ren
 -- organization membership, entitlement and metadata ownership on the server.
 commit;
 
--- Issued signed URLs remain usable until their 60-second expiry even after session revocation.
+-- Signed URLs may remain accessible after revocation or expiry due to browser or CDN caching.
+-- Uploads request no-store, but expiry and cache behavior must be verified in the target environment.

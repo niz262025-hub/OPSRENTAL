@@ -1,0 +1,9 @@
+# Private document recovery
+
+This proposal requires the document schema and private bucket to be provisioned in an explicitly authorized isolated environment before testing. Do not apply it to hosted environments without approval.
+
+The API reserves a metadata row as `pending` before it uploads the object, then changes it to `ready` after the upload. If an upload or finalization fails, the row and object may be in an uncertain state. The list labels pending records as incomplete; only an owner or admin can request deletion, and a pending row must be at least two minutes old. The age delay reduces overlap with an active upload but cannot prove a timed-out remote request has stopped. Inspect and reconcile the object and metadata in the isolated environment if the remote operation's outcome is uncertain.
+
+Deletion marks the row `deleting` first, deletes the storage object, then removes metadata. An error leaves a visible `deleting` row for an owner or admin to retry. A failed response can have an uncertain remote outcome: validate retry behavior with the real Storage service, including deletion of an already-absent object, before release. These steps do not provide a distributed transaction or automatic background cleanup. Monitor pending and deleting rows, confirm retained objects are private, and resolve them through an authorized recovery process.
+
+Signed URLs use a 60-second token and uploads request no-store. Already-issued URLs may survive session revocation, and browser or CDN caching can extend availability beyond token expiry. Verify cache headers and expiry with the actual deployment; do not treat the token lifetime as an immediate revocation guarantee.
