@@ -20,3 +20,42 @@ jobs:
       - run: npm run check
       - run: node --check rental-api.js
       - run: npm test
+  private-storage-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      SUPABASE_EXPERIMENTAL_STACK: '1'
+      SUPABASE_TELEMETRY_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Start disposable local Supabase and run storage UAT
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD || true
+          export SUPABASE_HOME="$RUNNER_TEMP/supabase-home"
+          test_dir="$RUNNER_TEMP/opsrental-storage-uat"
+          mkdir -p "$test_dir"
+          npm install --prefix "$test_dir" --no-save supabase@3.2.0 >/dev/null
+          cli="$test_dir/node_modules/.bin/supabase"
+          cd "$test_dir"
+          "$cli" init >/dev/null
+          cleanup() { "$cli" stop --stack rental-uat >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          "$cli" start --stack rental-uat --runtime native --preparation on-demand --exclude realtime,functions,studio,mail,analytics,pooler > "$RUNNER_TEMP/supabase-start.log" 2>&1 || { echo 'Local Supabase failed to start; inspect runner service connectivity.'; exit 1; }
+          "$cli" status --stack rental-uat --env --output-format text > "$RUNNER_TEMP/supabase-local.env"
+          set -a
+          source "$RUNNER_TEMP/supabase-local.env"
+          set +a
+          case "${API_URL:-}" in http://127.0.0.1:*|http://localhost:*) ;; *) echo 'Refusing non-loopback API'; exit 1;; esac
+          test -n "${SERVICE_ROLE_KEY:-}"
+          "$cli" db query --file "$GITHUB_WORKSPACE/tests/storage-uat/fixture.sql" >/dev/null
+          cd "$GITHUB_WORKSPACE"
+          node --test tests/storage-uat/real-storage.test.mjs
