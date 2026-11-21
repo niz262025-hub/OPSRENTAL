@@ -1,3 +1,4 @@
+import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
 import {parseCookie,checkEntitlement} from "../sso/session.js";
 import {rentalDatabaseUrl} from './db-config.js';
 const names={properties:"rental_properties",leases:"rental_leases",payments:"rental_payments",tickets:"rental_tickets"};
@@ -13,11 +14,12 @@ async function query(table, filters={},method="GET",body) {
  if(!key)throw Error("config");
  const url=new URL("/rest/v1/"+table,base);url.searchParams.set("select","*");
  for(const [k,v] of Object.entries(filters))url.searchParams.set(k,"eq."+v);
- const response=await fetch(url,{method,headers:{apikey:key,Authorization:"Bearer "+key,"content-type":"application/json",Prefer:"return=representation"},body:body?JSON.stringify(body):undefined,cache:"no-store",signal:AbortSignal.timeout(8000)});
+ const response=await fetch(url,{method,headers:{apikey:key,Authorization:"Bearer "+key,"content-type":"application/json",Prefer:"return=representation"},body:body?JSON.stringify(body):undefined,cache:"no-store",redirect:"error",signal:AbortSignal.timeout(8000)});
  if(!response.ok)throw Error("db");return response.json();
 }
 export default async function handler(req,res){
  res.setHeader("Cache-Control","private, no-store");
+  if (rentalAccessDisabled()) return res.status(503).json({error:"Rental access temporarily disabled"});
  if(!["POST","PATCH"].includes(req.method))return res.status(405).json({error:"Method not allowed"});
  const origin=req.headers.origin,host=req.headers.host;
  if(!origin||!host)return res.status(403).json({error:"Same-origin request required"});
@@ -33,6 +35,7 @@ export default async function handler(req,res){
   if(!session||!uuid.test(session.user_id))return res.status(403).json({error:"Invalid session"});
   const membership=await query("myops_memberships",{user_id:session.user_id,organization_id:org,status:"active"});
   if(!membership.some(m=>["owner","admin","manager"].includes(m.role)))return res.status(403).json({error:"Manager role required"});
+  if(!(await organizationEntitled(query,session.user_id,org)))return res.status(403).json({error:"Organization entitlement denied"});
   const input=req.body;
   if(!input||typeof input!=="object"||Array.isArray(input)||!Object.keys(input).length||Object.keys(input).some(k=>!fields[resource].includes(k)))return res.status(400).json({error:"Invalid fields"});
   for(const k of ["property_id","lease_id","tenant_user_id"])if(k in input&&!uuid.test(input[k]))return res.status(400).json({error:"Invalid reference"});

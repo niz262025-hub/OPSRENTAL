@@ -22,6 +22,8 @@ test('API requires active central session and membership, and rejects foreign pr
   let rows=[];
   if(table==='myops_app_sessions')rows=[{id:sid,user_id:user,product_slug:'opsrental',revoked_at:revoked?'2026-01-01':null}];
   if(table==='myops_memberships'&&active){ rows=[{user_id:user,organization_id:orgA,status:'active',role:'manager'}]; if(extraMembership)rows.push({user_id:user,organization_id:orgB,status:'active',role:'manager'}); if(u.searchParams.get('organization_id'))rows=rows.filter(m=>u.searchParams.get('organization_id')===`eq.${m.organization_id}`); }
+  if(table==='myops_app_grants') rows=[{user_id:user,organization_id:orgA,product_slug:'opsrental'}];
+  if(table==='myops_subscriptions') rows=[{organization_id:orgA,personal_user_id:null,status:'active',product_slug:'opsrental',current_period_end:null}];
   if(table==='rental_properties')rows=u.searchParams.get('organization_id')===`eq.${orgA}`?[{id:property,organization_id:orgA}]:[];
   if(options.method==='POST'||options.method==='PATCH'){writes.push({table,method:options.method,body:JSON.parse(options.body)});return {ok:true,json:async()=>[JSON.parse(options.body)]};}
   return {ok:true,json:async()=>rows};

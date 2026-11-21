@@ -1,3 +1,4 @@
+import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
 import { parseCookie, checkEntitlement } from "../sso/session.js";
 import { rentalDatabaseUrl } from './db-config.js';
 const tables = Object.freeze({
@@ -14,12 +15,13 @@ async function db(table, filters) {
   url.searchParams.set("select", "*");
   for (const [k,v] of Object.entries(filters)) url.searchParams.set(k, "eq." + v);
   url.searchParams.set("limit", "250");
-  const response = await fetch(url, { headers: { apikey:key, Authorization:"Bearer " + key }, cache:"no-store", signal:AbortSignal.timeout(8000) });
+  const response = await fetch(url, { headers: { apikey:key, Authorization:"Bearer " + key }, cache:"no-store", redirect:"error", signal:AbortSignal.timeout(8000) });
   if (!response.ok) throw new Error("Database request failed");
   return response.json();
 }
 export default async function handler(req,res) {
   res.setHeader("Cache-Control","private, no-store");
+  if (rentalAccessDisabled()) return res.status(503).json({error:"Rental access temporarily disabled"});
   if (req.method !== "GET") return res.status(405).json({error:"Method not allowed"});
   const table = tables[req.query?.resource];
   if (!table) return res.status(400).json({error:"Unknown resource"});
@@ -37,6 +39,7 @@ export default async function handler(req,res) {
     const manager = member && ["owner","admin","manager"].includes(member.role);
     if (!manager && table === "rental_documents") return res.status(403).json({error:"Not authorized"});
     if (!manager && !member) return res.status(403).json({error:"Not a member"});
+    if (!(await organizationEntitled(db, session.user_id, requestedOrg))) return res.status(403).json({error:"Organization entitlement denied"});
     // Tenant access must be narrowed by an assigned lease, never by membership alone.
     let records = await db(table, {organization_id:requestedOrg});
     if (!manager) {

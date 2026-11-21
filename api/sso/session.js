@@ -1,3 +1,4 @@
+import { rentalAccessDisabled } from '../rental/authorization.js';
 import { createHmac, timingSafeEqual, createPrivateKey, createHash, randomBytes, sign } from "node:crypto";
 import { myopsOrigin } from './myops-origin.js';
 const cookieName = "__Host-opsrental-session";
@@ -29,7 +30,7 @@ export async function checkEntitlement(sid) {
     method: "POST", headers: { "content-type": "application/json", "x-myops-app-id": "opsrental",
       "x-myops-key-version": "current", "x-myops-timestamp": timestamp,
       "x-myops-nonce": nonce, "x-myops-signature": signature },
-    body: canonicalJson(body), signal: AbortSignal.timeout(8000)
+    body: canonicalJson(body), redirect:"error", signal: AbortSignal.timeout(8000)
   });
   if (!response.ok) return false;
   const result = await response.json();
@@ -37,6 +38,7 @@ export async function checkEntitlement(sid) {
 }
 export default async function handler(req,res) {
   res.setHeader("Cache-Control","private, no-store");
+  if (rentalAccessDisabled()) return res.status(503).json({error:"Rental access temporarily disabled"});
   if (req.method !== "GET") return res.status(405).json({ error:"Method not allowed" });
   const sid = parseCookie(req);
   if (!sid) return res.status(401).json({ authenticated:false });

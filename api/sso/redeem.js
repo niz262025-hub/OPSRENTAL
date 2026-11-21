@@ -1,3 +1,4 @@
+import { rentalAccessDisabled } from '../rental/authorization.js';
 import { createPrivateKey, randomBytes, createHash, sign, createHmac } from "node:crypto";
 import { myopsOrigin } from './myops-origin.js';
 const TICKET = /^[A-Za-z0-9_-]{43}$/;
@@ -22,6 +23,7 @@ function signedRequest(ticket, privateKey, clock = Date.now, nonceFactory = () =
 export { signedRequest, canonicalJson };
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "private, no-store");
+  if (rentalAccessDisabled()) return res.status(503).json({error:"Rental access temporarily disabled"});
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   const origin = req.headers.origin;
   const host = req.headers.host;
@@ -45,7 +47,7 @@ export default async function handler(req, res) {
     let upstream;
     try {
       upstream = await fetch(myopsOrigin() + "/api/app/redeem", {
-        method: "POST", headers: signed.headers, body: JSON.stringify(signed.body), signal: controller.signal
+        method: "POST", headers: signed.headers, body: JSON.stringify(signed.body), redirect:"error", signal: controller.signal
       });
     } finally { clearTimeout(timeout); }
     if (!upstream.ok) return res.status(upstream.status === 401 || upstream.status === 403 ? upstream.status : 503).json({ error: "MYOPS ticket rejected or unavailable" });
