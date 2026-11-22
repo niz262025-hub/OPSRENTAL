@@ -54,6 +54,15 @@ test('disposable real private Storage and Postgres integration', {timeout:180000
   const direct=await fetch(new URL(rawPath,local));assert.ok(direct.ok);
   console.log('Direct Storage cache-control:',direct.headers.get('cache-control')??'(absent)','expires:',direct.headers.get('expires')??'(absent)');
   assert.equal((await req('GET','signed-url',{id,organization_id:foreign})).code,403);
+  const foreignDocument = { id, organization_id: foreign };
+  assert.equal((await req('GET', 'view', foreignDocument)).code, 403);
+  assert.equal((await req('DELETE', 'delete', foreignDocument)).code, 403);
+  const ownerList = await req('GET', 'list');
+  assert.ok(ownerList.body.items.some(item => item.id === id && item.state === 'ready'));
+  const ownerView = await req('GET', 'view', { id });
+  assert.equal(ownerView.code, 200);
+
+
   await admin('/rest/v1/myops_memberships?user_id=eq.'+user,{method:'PATCH',body:JSON.stringify({role:'tenant'})});assert.equal((await req('GET','view',{id})).code,403);assert.equal((await req('GET','download',{id})).code,403);
   await admin('/rest/v1/myops_memberships?user_id=eq.'+user,{method:'PATCH',body:JSON.stringify({role:'owner'})});
   await admin('/rest/v1/myops_app_sessions?id=eq.'+sid,{method:'PATCH',body:JSON.stringify({revoked_at:new Date().toISOString()})});assert.equal((await req('GET','view',{id})).code,403);assert.equal((await req('GET','signed-view',{id,token})).code,403);assert.equal((await req('GET','download',{id})).code,403);
