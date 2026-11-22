@@ -70,49 +70,19 @@ jobs:
       github.event.pull_request.head.repo.id == github.event.repository.id &&
       github.event.pull_request.head.ref == 'fix/rental-central-return-navigation'
     runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions: {}
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - name: Verify protected Preview and signed-out application denial
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --package-lock=false --ignore-scripts playwright@1.58.2
+      - run: npx playwright install --with-deps chromium
+      - name: Capture signed-out Preview responses in two isolated contexts
         env:
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          from urllib.error import HTTPError, URLError
-          from urllib.request import HTTPRedirectHandler, Request, build_opener
-
-          class RefuseRedirects(HTTPRedirectHandler):
-              def redirect_request(self, req, fp, code, msg, headers, newurl):
-                  return None
-
-          secret = os.environ.get("VERCEL_AUTOMATION_BYPASS_SECRET")
-          print("Actions secret available to this workflow:", bool(secret))
-          if not secret:
-              raise SystemExit("Staging automation secret is unavailable.")
-
-          url = "https://opsrental-staging-gc83iz4vf-mohd-syaiful-nizam1.vercel.app/api/rental/documents"
-          request = Request(url, headers={
-              "Accept": "application/json",
-              "x-vercel-protection-bypass": secret,
-          })
-          try:
-              response = build_opener(RefuseRedirects).open(request, timeout=20)
-          except HTTPError as error:
-              response = error
-          except (URLError, TimeoutError):
-              raise SystemExit("OpsRental Preview request failed before an HTTP response.") from None
-
-          with response:
-              status = response.code
-              try:
-                  body = json.loads(response.read(8192))
-              except (ValueError, UnicodeError):
-                  body = None
-
-          app_denied = status == 401 and body == {"error": "MYOPS session required"}
-          print(f"OpsRental documents HTTP {status}; application session denial verified: {app_denied}")
-          if not app_denied:
-              raise SystemExit("Expected authenticated Vercel access and an application-level session denial.")
-          PY
+        run: node tests/hosted-preview-probe.mjs
