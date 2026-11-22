@@ -32,6 +32,7 @@ async function authenticatedLaunch(browser, fixture) {
         redirectHop: !!response.request().redirectedFrom(), serviceWorker: response.fromServiceWorker() }));
     });
     const centralProtection = process.env.OPSRENTAL_UAT_CENTRAL_PREVIEW_SECRET;
+    console.log(JSON.stringify({ context: fixture.label, centralProtectionConfigured: Boolean(centralProtection) }));
     const headers = { origin: central, 'content-type': 'application/json',
       ...(centralProtection ? { 'x-vercel-protection-bypass': centralProtection } : {}) };
     async function authRequest(action, payload) {
@@ -43,6 +44,8 @@ async function authenticatedLaunch(browser, fixture) {
         const body = await response.json().catch(() => null);
         if (body?.error === 'Invalid credentials or email not confirmed.') {
           outcome = 'application_login_rejected';
+        } else if (response.status() === 401 && body?.message === 'Protected by Vercel Authentication') {
+          outcome = 'vercel_deployment_protection_denied';
         } else if (response.status() === 401 && !body) {
           outcome = 'non_json_unauthorized';
         } else {
@@ -53,6 +56,7 @@ async function authenticatedLaunch(browser, fixture) {
       assert.equal(response.status(), 200);
       return response;
     }
+    await authRequest('session', { activity: false });
     await authRequest('login', { email: fixture.email, password: fixture.password });
     const launch = await authRequest('launch', { product: 'opsrental' });
     const destination = new URL((await launch.json()).next);
