@@ -70,6 +70,22 @@ async function authenticatedLaunch(browser, fixture) {
     const result = await verified.json();
     assert.ok(result.authenticated === true && result.product === 'opsrental');
     console.log(`${fixture.label}: authenticated Central launch verified`);
+    async function readRental(path, label) {
+      const response = await context.request.get(new URL(path, target.origin).href, {
+        headers: { 'x-vercel-protection-bypass': secret }, maxRedirects: 0,
+      });
+      console.log(JSON.stringify({ context: fixture.label, check: label, status: response.status() }));
+      assert.equal(response.status(), 200);
+      return response.json();
+    }
+    const membership = await readRental('/api/rental/organizations', 'organization_list');
+    assert.ok(Array.isArray(membership.organizations) && membership.organizations.length === 1);
+    const organizationId = membership.organizations[0].organization_id;
+    assert.ok(typeof organizationId === 'string' && /^[a-f0-9-]{36}$/i.test(organizationId));
+    const query = new URLSearchParams({ organization_id: organizationId, action: 'list' });
+    const docs = await readRental(`/api/rental/documents?${query}`, 'own_document_list');
+    assert.ok(Array.isArray(docs.items) && docs.items.every(item => !Object.hasOwn(item, 'storage_path')));
+    return organizationId;
   } catch {
     throw new Error(`${fixture.label}: authenticated launch failed; see status-only evidence`);
   } finally {
@@ -118,6 +134,8 @@ try {
       if (result.status === 'rejected') console.error(`${fixtures[index].label}: authenticated checks failed`);
     }
     assert.ok(results.every(result => result.status === 'fulfilled'));
+    assert.ok(results[0].value !== results[1].value);
+    console.log('Distinct fixture organization visibility and own document lists verified');
   } else {
     console.log('BLOCKED: Missing approved Org A/B staging sign-in secrets.');
   }
