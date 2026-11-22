@@ -92,7 +92,7 @@ jobs:
           if not secret:
               raise SystemExit("Staging automation secret is unavailable.")
 
-          url = "https://opsrental-staging-bytplywc7-mohd-syaiful-nizam1.vercel.app/api/rental/documents"
+          url = "https://opsrental-staging-gc83iz4vf-mohd-syaiful-nizam1.vercel.app/api/rental/documents"
           request = Request(url, headers={
               "Accept": "application/json",
               "x-vercel-protection-bypass": secret,
