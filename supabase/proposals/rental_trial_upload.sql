@@ -36,6 +36,7 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'Pending document missing'; END IF;
  ELSE
   IF p_finalize THEN RAISE EXCEPTION 'Reservation required' USING ERRCODE='22023'; END IF;
+  PERFORM public.myops_rental_expire_empty_uploads(t.id,p_org);
   SELECT count(*) INTO used FROM public.myops_rental_trial_operations
   WHERE trial_id=t.id AND app_id='opsrental' AND status IN ('pending','uploading','completed','recovery_required');
   IF used>=30 THEN RETURN jsonb_build_object('error','trial_limit_reached','limit',30,'used',used); END IF;
@@ -49,6 +50,8 @@ BEGIN
    jsonb_build_object('document_id',doc.id,'storage_path',doc.storage_path));
  END IF;
  IF NOT p_finalize THEN
+  UPDATE public.myops_rental_trial_operations SET reserved_at=clock_timestamp()
+  WHERE trial_id=t.id AND app_id='opsrental' AND operation_id=p_operation;
   RETURN jsonb_build_object('status','uploading','document_id',doc.id,'storage_path',doc.storage_path);
  END IF;
  -- The trusted API must verify the immutable object's bytes against p_sha256

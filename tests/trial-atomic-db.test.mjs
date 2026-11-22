@@ -40,9 +40,9 @@ test('atomic trial SQL rejects 31st operation, deduplicates and rolls back faile
   assert.equal((await rpc(13,'payments',{lease_id:lease.item.id,amount:5,due_date:'2026-01-02'})).used,3);
   assert.equal((await rpc(14,'tickets',{lease_id:lease.item.id,title:'Synthetic'})).used,4);
   for(let i=15;i<40;i++) assert.equal((await create(i)).used,i-10);
-  const upload=async(finalize=false,digest='a'.repeat(64))=>(await db.query(
+  const upload=async(finalize=false,digest='a'.repeat(64),operation=40)=>(await db.query(
    'select myops_rental_trial_upload($1,$2,$3,$4,$5,null,$6,$7) as v',
-   [session,org,id(40),'synthetic.pdf',first.item.id,digest,finalize]
+   [session,org,id(operation),'synthetic.pdf',first.item.id,digest,finalize]
   )).rows[0].v;
   const reservation=await upload();
   assert.equal(reservation.status,'uploading');
@@ -52,6 +52,8 @@ test('atomic trial SQL rejects 31st operation, deduplicates and rolls back faile
   assert.equal((await db.query('select state from rental_documents where id=$1',[reservation.document_id])).rows[0].state,'pending');
   assert.equal((await create(99)).error,'trial_limit_reached');
   await db.query("insert into storage.objects(bucket_id,name) values ('opsrental-private',$1)",[reservation.storage_path]);
+  await db.query("update myops_rental_trial_operations set reserved_at=now()-interval '16 minutes' where operation_id=$1",[id(40)]);
+  assert.equal((await create(99)).error,'trial_limit_reached');
   const completed=await upload(true);
   assert.equal(completed.status,'completed');
   assert.equal(completed.item.state,'ready');
@@ -60,6 +62,17 @@ test('atomic trial SQL rejects 31st operation, deduplicates and rolls back faile
   assert.equal((await create(99)).error,'trial_limit_reached');
   assert.equal((await db.query('select count(*)::int n from rental_properties')).rows[0].n,26);
   assert.equal((await db.query('select count(*)::int n from myops_rental_trial_operations')).rows[0].n,30);
+  // An empty abandoned upload frees one slot and cannot be finalized late.
+  await db.query('delete from myops_rental_trial_operations where operation_id=$1',[id(39)]);
+  const abandoned=await upload(false,'a'.repeat(64),41);
+  assert.equal((await create(99)).error,'trial_limit_reached');
+  await db.query("update myops_rental_trial_operations set reserved_at=now()-interval '16 minutes' where operation_id=$1",[id(41)]);
+  assert.equal((await create(99)).used,30);
+  assert.equal((await db.query('select state from rental_documents where id=$1',[abandoned.document_id])).rows.length,0);
+  await db.query("insert into storage.objects(bucket_id,name) values ('opsrental-private',$1)",[abandoned.storage_path]);
+  await assert.rejects(upload(true,'a'.repeat(64),41),/Operation conflict/);
+  assert.equal((await create(99)).replayed,true);
+  assert.equal((await create(98)).error,'trial_limit_reached');
   await db.query("update myops_trials set status='expired' where id=$1",[trial]);
   await assert.rejects(create(100),/Trial inactive/);
   await db.query("update myops_trials set status='active' where id=$1",[trial]);

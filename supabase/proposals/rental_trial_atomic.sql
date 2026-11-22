@@ -43,6 +43,32 @@ END $$;
 REVOKE ALL ON FUNCTION public.myops_rental_lock_trial(uuid,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.myops_rental_lock_trial(uuid,uuid) TO service_role;
 
+-- Callers hold the trial row lock. A failed ledger row permanently retires
+-- the operation ID and object path, including after a late Storage response.
+CREATE FUNCTION public.myops_rental_expire_empty_uploads(p_trial uuid,p_org uuid)
+RETURNS void LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+BEGIN
+ WITH expired AS (
+  DELETE FROM public.rental_documents AS doc
+  USING public.myops_rental_trial_operations AS op
+  WHERE op.trial_id=p_trial AND op.organization_id=p_org
+    AND op.status='uploading' AND op.operation_type='upload_document'
+    AND op.reserved_at < clock_timestamp()-interval '15 minutes'
+    AND doc.organization_id=p_org AND doc.state='pending'
+    AND doc.id::text=op.recovery_metadata->>'document_id'
+    AND doc.storage_path=op.recovery_metadata->>'storage_path'
+    AND EXISTS (SELECT FROM storage.buckets WHERE id='opsrental-private' AND public=false)
+    AND NOT EXISTS (SELECT FROM storage.objects WHERE bucket_id='opsrental-private' AND name=doc.storage_path)
+  RETURNING op.operation_id
+ )
+ UPDATE public.myops_rental_trial_operations AS op SET status='failed'
+ FROM expired
+ WHERE op.trial_id=p_trial AND op.app_id='opsrental' AND op.operation_id=expired.operation_id;
+END $$;
+REVOKE ALL ON FUNCTION public.myops_rental_expire_empty_uploads(uuid,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.myops_rental_expire_empty_uploads(uuid,uuid) TO service_role;
+
+
 CREATE FUNCTION public.myops_rental_trial_create(p_session uuid,p_org uuid,p_operation uuid,p_kind text,p_input jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
 DECLARE t public.myops_trials%rowtype; old_op public.myops_rental_trial_operations%rowtype;
@@ -51,6 +77,7 @@ BEGIN
  IF p_session IS NULL OR p_org IS NULL OR p_operation IS NULL OR jsonb_typeof(p_input) IS DISTINCT FROM 'object' THEN
   RAISE EXCEPTION 'Invalid operation' USING ERRCODE='22023'; END IF;
  t:=public.myops_rental_lock_trial(p_session,p_org);
+ PERFORM public.myops_rental_expire_empty_uploads(t.id,p_org);
  valid_fields:=CASE p_kind WHEN 'properties' THEN ARRAY['name','address','unit_label','parking_spaces']
   WHEN 'leases' THEN ARRAY['property_id','tenant_user_id','monthly_rent','currency','start_date','end_date','status','parking_spaces']
   WHEN 'payments' THEN ARRAY['lease_id','amount','due_date','paid_at','status','reference']

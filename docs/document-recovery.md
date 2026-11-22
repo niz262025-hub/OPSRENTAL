@@ -9,3 +9,16 @@ Deletion marks the row `deleting` first, deletes the storage object, then remove
 Signed URLs use a 60-second token and uploads request no-store. Already-issued URLs may survive session revocation, and browser or CDN caching can extend availability beyond token expiry. Verify cache headers and expiry with the actual deployment; do not treat the token lifetime as an immediate revocation guarantee.
 
 The normal View button and application-signed links use the session-checked application proxy. It sets `private, no-store`, a sandboxed content security policy and `nosniff`. Links are bound to a specific session, organization and document for 60 seconds, and every use rechecks the live session and entitlement. They are not transferable to another session. Direct Storage signed URLs are not returned by the application. Previously issued direct Storage URLs may remain accessible until expiry or longer through caches. Hosted browser and CDN behavior still needs verification.
+
+Trial writes automatically reclaim empty upload reservations after 15 minutes.
+The cleanup runs under the same trial-row lock as quota allocation. A retry
+renews the reservation before calling Storage. If Storage already has the
+object, the reservation stays charged and the original idempotency key can
+finish it after the API verifies the content digest. A reclaimed operation
+keeps its ledger entry and cannot become ready or charge quota later.
+
+Cleanup never deletes a Storage object. A late remote write after cleanup can
+leave an inaccessible private orphan at the retired path. Retain the failed
+ledger row for reconciliation and delete such objects through the Storage API
+after hosted verification. Idle trials are swept when their next quota write
+runs.
