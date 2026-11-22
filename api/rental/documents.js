@@ -1,5 +1,5 @@
 import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
-import { parseCookie, checkEntitlement } from '../sso/session.js';
+import { parseCookie, checkEntitlement, checkScopedAdmin } from '../sso/session.js';
 import { rentalDatabaseUrl } from './db-config.js';
 import {createHmac,timingSafeEqual} from 'node:crypto';
 
@@ -64,7 +64,7 @@ export default async function handler(req,res){
   const membership=await rows('myops_memberships',{user_id:session.user_id,organization_id:org,status:'active'});
   const role=membership[0]?.role;
   if(!['owner','admin','manager'].includes(role))return deny(res,403,'Document manager access required');
-  if(!(await organizationEntitled(rows,session.user_id,org)))return deny(res,403,'Organization entitlement denied');
+  if(!((await organizationEntitled(rows,session.user_id,org) || await checkScopedAdmin(sid,org))))return deny(res,403,'Organization entitlement denied');
   const id=req.query?.id,action=req.query?.action||'list';
   if(req.method==='GET'&&action==='list'){
    const docs=await rows('rental_documents',{organization_id:org});

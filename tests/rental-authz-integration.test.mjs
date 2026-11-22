@@ -14,10 +14,10 @@ test('API requires active central session and membership, and rejects foreign pr
  const body=Buffer.from(JSON.stringify({sid,exp:Date.now()+60000})).toString('base64url');
  const mac=createHmac('sha256',process.env.MYOPS_RENTAL_SESSION_SECRET).update(body).digest('base64url');
  const headers={cookie:`__Host-opsrental-session=${body}.${mac}`,origin:'https://rental.example',host:'rental.example'};
- let revoked=false, entitled=true, active=true, extraMembership=false, role='manager', writes=[];
+ let revoked=false, entitled=true, active=true, extraMembership=false, adminScope=null, role='manager', writes=[];
  globalThis.fetch=async (url,options={})=>{
   const u=new URL(url);
-  if(u.pathname==='/api/app/entitlement')return {ok:true,json:async()=>({entitled,session_active:!revoked})};
+  if(u.pathname==='/api/app/entitlement'){ const request=JSON.parse(options.body); return {ok:true,json:async()=>({entitled,session_active:!revoked,...(request.organization_id && adminScope ? {access_mode:'admin',organization_id:adminScope} : {})})}; }
   const table=u.pathname.split('/').pop();
   let rows=[];
   if(table==='myops_app_sessions')rows=[{id:sid,user_id:user,product_slug:'opsrental',revoked_at:revoked?'2026-01-01':null}];
@@ -39,7 +39,9 @@ test('API requires active central session and membership, and rejects foreign pr
   assert.equal((await post(orgB,{name:'Foreign'})).statusCode,403);
   extraMembership=true;
   assert.equal((await post(orgB,{property_id:property,tenant_user_id:user,monthly_rent:1,start_date:'2026-01-01'},'leases')).statusCode,403);
-  extraMembership=false;
+  role='owner'; adminScope=orgB; assert.equal((await get(orgB)).statusCode,200);
+  adminScope=orgA; assert.equal((await get(orgB)).statusCode,403);
+  adminScope=null; extraMembership=false; role='manager';
   const del=async(org)=>{const res=response();await write({method:'DELETE',headers,query:{resource:'properties',organization_id:org,id:property}},res);return res};
   assert.equal((await del(orgA)).statusCode,403);
   role='owner';assert.equal((await del(orgA)).statusCode,200);

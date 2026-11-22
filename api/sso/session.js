@@ -17,11 +17,12 @@ export function parseCookie(req) {
   } catch { return null; }
 }
 function canonicalJson(obj) { return JSON.stringify(Object.fromEntries(Object.entries(obj).sort(([a],[b])=>a.localeCompare(b)))); }
-export async function checkEntitlement(sid) {
+async function entitlementResponse(sid, organizationId) {
   const privateKey = process.env.MYOPS_APP_PRIVATE_KEY;
   if (!privateKey) throw new Error("Missing signing key");
   const path = "/api/app/entitlement";
-  const body = { session_id: sid, product: "opsrental", activity: false, sensitive: false };
+  const body = { session_id: sid, product: "opsrental", activity: false, sensitive: false,
+    ...(organizationId ? { organization_id: organizationId } : {}) };
   const timestamp = String(Date.now()), nonce = randomBytes(24).toString("base64url");
   const digest = createHash("sha256").update(canonicalJson(body)).digest("hex");
   const message = `POST\n${path}\nopsrental\ncurrent\n${timestamp}\n${nonce}\n${digest}`;
@@ -32,9 +33,17 @@ export async function checkEntitlement(sid) {
       "x-myops-nonce": nonce, "x-myops-signature": signature },
     body: canonicalJson(body), redirect:"error", signal: AbortSignal.timeout(8000)
   });
-  if (!response.ok) return false;
-  const result = await response.json();
-  return result.entitled === true && result.session_active === true;
+  if (!response.ok) return null;
+  return response.json();
+}
+export async function checkEntitlement(sid) {
+  const result = await entitlementResponse(sid);
+  return result?.entitled === true && result.session_active === true;
+}
+export async function checkScopedAdmin(sid, organizationId) {
+  const result = await entitlementResponse(sid, organizationId);
+  return result?.entitled === true && result.session_active === true &&
+    result.access_mode === 'admin' && result.organization_id === organizationId;
 }
 export default async function handler(req,res) {
   res.setHeader("Cache-Control","private, no-store");

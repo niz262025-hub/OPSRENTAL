@@ -1,5 +1,5 @@
 import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
-import {parseCookie,checkEntitlement} from "../sso/session.js";
+import {parseCookie,checkEntitlement,checkScopedAdmin} from "../sso/session.js";
 import {rentalDatabaseUrl} from './db-config.js';
 const names={properties:"rental_properties",leases:"rental_leases",payments:"rental_payments",tickets:"rental_tickets"};
 const fields={
@@ -35,7 +35,7 @@ export default async function handler(req,res){
   if(!session||!uuid.test(session.user_id))return res.status(403).json({error:"Invalid session"});
   const membership=await query("myops_memberships",{user_id:session.user_id,organization_id:org,status:"active"});
   if(!membership.some(m=>["owner","admin","manager"].includes(m.role)))return res.status(403).json({error:"Manager role required"});
-  if(!(await organizationEntitled(query,session.user_id,org)))return res.status(403).json({error:"Organization entitlement denied"});
+  if(!((await organizationEntitled(query,session.user_id,org) || await checkScopedAdmin(sid,org))))return res.status(403).json({error:"Organization entitlement denied"});
   if(req.method==="DELETE") {
    if(!membership.some(m=>["owner","admin"].includes(m.role)))return res.status(403).json({error:"Owner or administrator required"});
    const id=req.query?.id;

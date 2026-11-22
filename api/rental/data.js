@@ -1,5 +1,5 @@
 import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
-import { parseCookie, checkEntitlement } from "../sso/session.js";
+import { parseCookie, checkEntitlement, checkScopedAdmin } from "../sso/session.js";
 import { rentalDatabaseUrl } from './db-config.js';
 const tables = Object.freeze({
   properties: "rental_properties", leases: "rental_leases",
@@ -39,7 +39,7 @@ export default async function handler(req,res) {
     const manager = member && ["owner","admin","manager"].includes(member.role);
     if (!manager && table === "rental_documents") return res.status(403).json({error:"Not authorized"});
     if (!manager && !member) return res.status(403).json({error:"Not a member"});
-    if (!(await organizationEntitled(db, session.user_id, requestedOrg))) return res.status(403).json({error:"Organization entitlement denied"});
+    if (!((await organizationEntitled(db, session.user_id, requestedOrg) || await checkScopedAdmin(sid, requestedOrg)))) return res.status(403).json({error:"Organization entitlement denied"});
     // Tenant access must be narrowed by an assigned lease, never by membership alone.
     let records = await db(table, {organization_id:requestedOrg});
     if (!manager) {

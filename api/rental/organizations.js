@@ -1,5 +1,5 @@
 import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
-import {parseCookie,checkEntitlement} from "../sso/session.js";
+import {parseCookie,checkEntitlement,checkScopedAdmin} from "../sso/session.js";
 import {rentalDatabaseUrl} from './db-config.js';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function lookup(table,filters){
@@ -22,7 +22,7 @@ export default async function handler(req,res){
   const session=sessions.find(s=>s.revoked_at===null&&s.product_slug==="opsrental");
   if(!session||!uuid.test(session.user_id))return res.status(403).json({error:"Invalid session"});
   const memberships=await lookup("myops_memberships",{user_id:session.user_id,status:"active"});
-  const checks=await Promise.all(memberships.map(async m=>({member:m,allowed:uuid.test(m.organization_id) && await organizationEntitled(lookup,session.user_id,m.organization_id)})));
+  const checks=await Promise.all(memberships.map(async m=>({member:m,allowed:uuid.test(m.organization_id) && (await organizationEntitled(lookup,session.user_id,m.organization_id) || await checkScopedAdmin(sid,m.organization_id))})));
   return res.status(200).json({organizations:checks.filter(x=>x.allowed).map(({member:m})=>({organization_id:m.organization_id,role:m.role}))});
  }catch{return res.status(503).json({error:"Organization lookup unavailable"});}
 }
