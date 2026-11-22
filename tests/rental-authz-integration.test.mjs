@@ -14,10 +14,10 @@ test('API requires active central session and membership, and rejects foreign pr
  const body=Buffer.from(JSON.stringify({sid,exp:Date.now()+60000})).toString('base64url');
  const mac=createHmac('sha256',process.env.MYOPS_RENTAL_SESSION_SECRET).update(body).digest('base64url');
  const headers={cookie:`__Host-opsrental-session=${body}.${mac}`,origin:'https://rental.example',host:'rental.example'};
- let revoked=false, entitled=true, active=true, extraMembership=false, adminScope=null, role='manager', writes=[];
+ let revoked=false, entitled=true, active=true, extraMembership=false, adminScope=null, accessMode='paid', role='manager', writes=[];
  globalThis.fetch=async (url,options={})=>{
   const u=new URL(url);
-  if(u.pathname==='/api/app/entitlement'){ const request=JSON.parse(options.body); return {ok:true,json:async()=>({entitled,session_active:!revoked,...(request.organization_id && adminScope ? {access_mode:'admin',organization_id:adminScope} : {})})}; }
+  if(u.pathname==='/api/app/entitlement'){ const request=JSON.parse(options.body); return {ok:true,json:async()=>({entitled,session_active:!revoked,access_mode:accessMode,...(request.organization_id && adminScope ? {access_mode:'admin',organization_id:adminScope} : {})})}; }
   const table=u.pathname.split('/').pop();
   let rows=[];
   if(table==='myops_app_sessions')rows=[{id:sid,user_id:user,product_slug:'opsrental',revoked_at:revoked?'2026-01-01':null}];
@@ -49,6 +49,7 @@ test('API requires active central session and membership, and rejects foreign pr
   assert.equal((await del(orgB)).statusCode,403);
   active=false;assert.equal((await get(orgA)).statusCode,403);active=true;
   entitled=false;assert.equal((await get(orgA)).statusCode,403);entitled=true;
+  accessMode='trial'; assert.equal((await get(orgA)).statusCode,403); assert.equal((await post(orgA,{name:'Blocked trial'})).statusCode,403); accessMode='paid';
   revoked=true;assert.equal((await get(orgA)).statusCode,403);
   assert.equal(writes.length,2);
  } finally {globalThis.fetch=originalFetch;process.env=old;}
