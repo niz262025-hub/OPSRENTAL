@@ -17,11 +17,11 @@ export function parseCookie(req) {
   } catch { return null; }
 }
 function canonicalJson(obj) { return JSON.stringify(Object.fromEntries(Object.entries(obj).sort(([a],[b])=>a.localeCompare(b)))); }
-async function entitlementResponse(sid, organizationId) {
+async function entitlementResponse(sid, organizationId, activity = false) {
   const privateKey = process.env.MYOPS_APP_PRIVATE_KEY;
   if (!privateKey) throw new Error("Missing signing key");
   const path = "/api/app/entitlement";
-  const body = { session_id: sid, product: "opsrental", activity: false, sensitive: false,
+  const body = { session_id: sid, product: "opsrental", activity, sensitive: false,
     ...(organizationId ? { organization_id: organizationId } : {}) };
   const timestamp = String(Date.now()), nonce = randomBytes(24).toString("base64url");
   const digest = createHash("sha256").update(canonicalJson(body)).digest("hex");
@@ -52,15 +52,32 @@ export async function checkScopedAdmin(sid, organizationId) {
   return result?.entitled === true && result.session_active === true &&
     result.access_mode === 'admin' && result.organization_id === organizationId;
 }
+function previewActivityEnabled() {
+  return process.env.VERCEL_ENV === 'preview' && process.env.MYOPS_RENTAL_ACTIVITY_PREVIEW === 'true';
+}
 export default async function handler(req,res) {
   res.setHeader("Cache-Control","private, no-store");
   if (rentalAccessDisabled()) return res.status(503).json({error:"Rental access temporarily disabled"});
-  if (req.method !== "GET") return res.status(405).json({ error:"Method not allowed" });
+  const activity = req.method === "POST";
+  if (req.method !== "GET" && (!activity || !previewActivityEnabled())) {
+    return res.status(405).json({ error:"Method not allowed" });
+  }
+  if (activity && (req.headers.origin !== `https://${req.headers.host}`
+      || req.headers['sec-fetch-site'] !== 'same-origin')) {
+    return res.status(403).json({ authenticated:false });
+  }
   const sid = parseCookie(req);
   if (!sid) return res.status(401).json({ authenticated:false });
   try {
     if (!(await checkEntitlement(sid))) return res.status(403).json({ authenticated:false });
-    return res.status(200).json({ authenticated:true, product:"opsrental" });
+    if (activity) {
+      const touched = await entitlementResponse(sid, undefined, true);
+      if (touched?.entitled !== true || touched.session_active !== true || touched.access_mode === 'trial') {
+        return res.status(403).json({ authenticated:false });
+      }
+    }
+    return res.status(200).json({ authenticated:true, product:"opsrental",
+      ...(previewActivityEnabled() ? { activity_enabled: true } : {}) });
   } catch {
     return res.status(503).json({ authenticated:false, error:"Central session verification unavailable" });
   }

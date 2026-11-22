@@ -30,7 +30,37 @@
     if (result.authenticated !== true || result.product !== "opsrental") throw new Error("Session verification failed.");
     const script = document.createElement("script");
     script.src = "/app.js";
-    script.onload = () => { app.hidden = false; gate.remove(); };
+    script.onload = () => {
+      app.hidden = false;
+      if (!result.activity_enabled) { gate.remove(); return; }
+      gate.hidden = true;
+
+      let lastAttempt = -Infinity;
+      let requesting = false;
+      async function renewOnInteraction(event) {
+        if (!event.isTrusted || event.repeat || document.hidden || app.hidden || requesting) return;
+        const now = performance.now();
+        if (now - lastAttempt < 60_000) return;
+        lastAttempt = now;
+        requesting = true;
+        try {
+          const renewal = await fetch("/api/sso/session", {
+            method: "POST", credentials: "same-origin", cache: "no-store",
+          });
+          if (renewal.status === 401 || renewal.status === 403) {
+            app.hidden = true;
+            gate.hidden = false;
+            deny("Sign in through MYOPS to continue.");
+          }
+        } catch {
+          // A transient request failure never extends the session locally.
+        } finally {
+          requesting = false;
+        }
+      }
+      app.addEventListener("pointerdown", renewOnInteraction, { passive: true });
+      app.addEventListener("keydown", renewOnInteraction);
+    };
     script.onerror = () => deny("Unable to load OpsRental.");
     document.body.append(script);
   } catch (error) {
