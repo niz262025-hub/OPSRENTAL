@@ -65,7 +65,7 @@ jobs:
   hosted-preview-probe:
     if: >-
       github.event_name == 'pull_request' && github.event.action == 'labeled' &&
-      github.event.label.name == 'staging-preview-probe-approved' &&
+      github.event.label.name == 'staging-preview-probe-approved.' &&
       github.actor == github.repository_owner && github.event.pull_request.number == 5 &&
       github.event.pull_request.head.repo.id == github.event.repository.id &&
       github.event.pull_request.head.ref == 'fix/rental-central-return-navigation'
