@@ -142,6 +142,18 @@ async function authenticatedLaunch(browser, fixture) {
       }
     }
     assert.equal(routeFailed, false);
+    if (fixture.label === 'A' && process.env.OPSRENTAL_UAT_NATURAL_IDLE === 'true') {
+      // Keep the browser context and cookie but stop page activity during the real idle window.
+      await page.close();
+      console.log('A: starting unmodified staging idle window');
+      await new Promise(resolve => setTimeout(resolve, 16 * 60 * 1000));
+      const expired = await context.request.get(new URL('/api/sso/session', target.origin).href, {
+        headers: { 'x-vercel-protection-bypass': secret }, maxRedirects: 0, timeout: 25000,
+      });
+      console.log(JSON.stringify({ context: fixture.label, check: 'natural_idle_session', status: expired.status() }));
+      assert.equal(expired.status(), 403);
+      assert.deepEqual(await expired.json(), { authenticated: false });
+    }
     return organizationId;
   } catch {
     throw new Error(`${fixture.label}: authenticated launch failed; see status-only evidence`);

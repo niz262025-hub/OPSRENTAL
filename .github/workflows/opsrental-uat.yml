@@ -70,7 +70,7 @@ jobs:
       github.event.pull_request.head.repo.id == github.event.repository.id &&
       github.event.pull_request.head.ref == 'fix/rental-central-return-navigation'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 23
     permissions:
       contents: read
     steps:
@@ -90,4 +90,5 @@ jobs:
           OPSRENTAL_UAT_ORG_B_EMAIL: ${{ secrets.OPSRENTAL_UAT_ORG_B_EMAIL }}
           OPSRENTAL_UAT_ORG_B_PASSWORD: ${{ secrets.OPSRENTAL_UAT_ORG_B_PASSWORD }}
           OPSRENTAL_UAT_CENTRAL_PREVIEW_SECRET: ${{ secrets.OPSRENTAL_UAT_CENTRAL_PREVIEW_SECRET }}
+          OPSRENTAL_UAT_NATURAL_IDLE: 'true'
         run: node tests/hosted-preview-probe.mjs
