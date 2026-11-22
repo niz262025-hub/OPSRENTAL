@@ -82,7 +82,12 @@ jobs:
           node-version: '22'
       - run: npm install --no-save --package-lock=false --ignore-scripts playwright@1.58.2
       - run: npx playwright install --with-deps chromium
-      - name: Capture signed-out Preview responses in two isolated contexts
+      - name: Capture Preview responses and launch approved staging fixtures
         env:
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          OPSRENTAL_UAT_ORG_A_EMAIL: ${{ secrets.OPSRENTAL_UAT_ORG_A_EMAIL }}
+          OPSRENTAL_UAT_ORG_A_PASSWORD: ${{ secrets.OPSRENTAL_UAT_ORG_A_PASSWORD }}
+          OPSRENTAL_UAT_ORG_B_EMAIL: ${{ secrets.OPSRENTAL_UAT_ORG_B_EMAIL }}
+          OPSRENTAL_UAT_ORG_B_PASSWORD: ${{ secrets.OPSRENTAL_UAT_ORG_B_PASSWORD }}
+          OPSRENTAL_UAT_CENTRAL_PREVIEW_SECRET: ${{ secrets.OPSRENTAL_UAT_CENTRAL_PREVIEW_SECRET }}
         run: node tests/hosted-preview-probe.mjs
