@@ -73,6 +73,7 @@ async function authenticatedLaunch(browser, fixture) {
   } catch {
     throw new Error(`${fixture.label}: authenticated launch failed; see status-only evidence`);
   } finally {
+    await context.unrouteAll({ behavior: 'wait' });
     await context.close();
   }
 }
@@ -102,6 +103,7 @@ async function probe(browser, label) {
     assert.deepEqual(await response.json(), { error: 'MYOPS session required' });
     console.log(`${label}: application-level signed-out denial verified`);
   } finally {
+    await context.unrouteAll({ behavior: 'wait' });
     await context.close();
   }
 }
@@ -111,7 +113,11 @@ try {
   await Promise.all([probe(browser, 'A'), probe(browser, 'B')]);
   if (fixtures.every(fixture => fixture.email && fixture.password)) {
     assert.ok(fixtures[0].email.toLowerCase() !== fixtures[1].email.toLowerCase());
-    await Promise.all(fixtures.map(fixture => authenticatedLaunch(browser, fixture)));
+    const results = await Promise.allSettled(fixtures.map(fixture => authenticatedLaunch(browser, fixture)));
+    for (const [index, result] of results.entries()) {
+      if (result.status === 'rejected') console.error(`${fixtures[index].label}: authenticated checks failed`);
+    }
+    assert.ok(results.every(result => result.status === 'fulfilled'));
   } else {
     console.log('BLOCKED: Missing approved Org A/B staging sign-in secrets.');
   }
