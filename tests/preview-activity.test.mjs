@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac, generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import handler from '../api/sso/session.js';
 
 test('only explicit same-origin Preview activity touches a live entitled session', async () => {
@@ -50,4 +52,36 @@ test('only explicit same-origin Preview activity touches a live entitled session
     process.env = previousEnv;
     globalThis.fetch = previousFetch;
   }
+});
+
+test('the activity gate sends renewals for visible trusted interaction only', async () => {
+  const events = new Map();
+  const calls = [];
+  let clock = 0;
+  const app = { hidden: true, addEventListener(name, fn) { events.set(name, fn); } };
+  const gate = { hidden: false };
+  const document = { hidden: false, getElementById(id) { return id === 'access-gate' ? gate : app; },
+    createElement() { return {}; },
+    body: { append(script) { script.onload(); } } };
+  const fetch = async (_url, req) => {
+    calls.push(req.method ?? 'GET');
+    return { ok: true, status: 200,
+      json: async () => ({ authenticated: true, product: 'opsrental', activity_enabled: true }) };
+  };
+  await runInNewContext(readFileSync(new URL('../access-gate.js', import.meta.url), 'utf8'), {
+    document, location: { hash: '' }, URLSearchParams, performance: { now: () => clock }, fetch,
+  });
+  assert.deepEqual(calls, ['GET']);
+  await events.get('pointerdown')({ isTrusted: false });
+  document.hidden = true;
+  await events.get('pointerdown')({ isTrusted: true });
+  document.hidden = false;
+  await events.get('keydown')({ isTrusted: true, repeat: true });
+  assert.deepEqual(calls, ['GET']);
+  await events.get('pointerdown')({ isTrusted: true });
+  clock = 59_999;
+  await events.get('keydown')({ isTrusted: true });
+  clock = 60_000;
+  await events.get('keydown')({ isTrusted: true });
+  assert.deepEqual(calls, ['GET', 'POST', 'POST']);
 });
