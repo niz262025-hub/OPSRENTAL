@@ -1,6 +1,6 @@
 import { rentalAccessDisabled } from '../rental/authorization.js';
 import { createPrivateKey, randomBytes, createHash, sign, createHmac } from "node:crypto";
-import { myopsOrigin } from './myops-origin.js';
+import { myopsBrokerRequest } from './myops-origin.js';
 const TICKET = /^[A-Za-z0-9_-]{43}$/;
 function canonicalJson(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -46,8 +46,9 @@ export default async function handler(req, res) {
     const timeout = setTimeout(() => controller.abort(), 8000);
     let upstream;
     try {
-      upstream = await fetch(myopsOrigin() + "/api/app/redeem", {
-        method: "POST", headers: signed.headers, body: JSON.stringify(signed.body), redirect:"error", signal: controller.signal
+      const request = myopsBrokerRequest("/api/app/redeem", signed.headers);
+      upstream = await fetch(request.url, {
+        method: "POST", headers: request.headers, body: JSON.stringify(signed.body), redirect: request.redirect, signal: controller.signal
       });
     } finally { clearTimeout(timeout); }
     if (!upstream.ok) return res.status(upstream.status === 401 || upstream.status === 403 ? upstream.status : 503).json({ error: "MYOPS ticket rejected or unavailable" });

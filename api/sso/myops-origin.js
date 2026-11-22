@@ -11,3 +11,16 @@ export function myopsOrigin(env = process.env) {
   if (configured !== STAGING) throw new Error('Staging MYOPS origin not configured');
   return STAGING;
 }
+
+// Only the signed server-to-server requests use the Central Preview credential.
+export function myopsBrokerRequest(path, signedHeaders, env = process.env) {
+  if (path !== '/api/app/redeem' && path !== '/api/app/entitlement') {
+    throw new Error('Unknown MYOPS broker endpoint');
+  }
+  const origin = myopsOrigin(env);
+  const headers = { ...signedHeaders };
+  if (env.VERCEL_ENV === 'preview' && origin === STAGING && env.MYOPS_CENTRAL_PREVIEW_BYPASS_SECRET) {
+    headers['x-vercel-protection-bypass'] = env.MYOPS_CENTRAL_PREVIEW_BYPASS_SECRET;
+  }
+  return { url: origin + path, headers, redirect: 'error' };
+}

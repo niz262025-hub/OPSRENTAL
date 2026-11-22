@@ -1,6 +1,6 @@
 import { rentalAccessDisabled } from '../rental/authorization.js';
 import { createHmac, timingSafeEqual, createPrivateKey, createHash, randomBytes, sign } from "node:crypto";
-import { myopsOrigin } from './myops-origin.js';
+import { myopsBrokerRequest } from './myops-origin.js';
 const cookieName = "__Host-opsrental-session";
 export function parseCookie(req) {
   const value = (req.headers.cookie || "").split(";").map(x => x.trim()).find(x => x.startsWith(cookieName + "="))?.slice(cookieName.length + 1);
@@ -27,11 +27,12 @@ async function entitlementResponse(sid, organizationId) {
   const digest = createHash("sha256").update(canonicalJson(body)).digest("hex");
   const message = `POST\n${path}\nopsrental\ncurrent\n${timestamp}\n${nonce}\n${digest}`;
   const signature = sign(null, Buffer.from(message), createPrivateKey(privateKey)).toString("base64url");
-  const response = await fetch(myopsOrigin() + path, {
-    method: "POST", headers: { "content-type": "application/json", "x-myops-app-id": "opsrental",
+  const request = myopsBrokerRequest(path, { "content-type": "application/json", "x-myops-app-id": "opsrental",
       "x-myops-key-version": "current", "x-myops-timestamp": timestamp,
-      "x-myops-nonce": nonce, "x-myops-signature": signature },
-    body: canonicalJson(body), redirect:"error", signal: AbortSignal.timeout(8000)
+      "x-myops-nonce": nonce, "x-myops-signature": signature });
+  const response = await fetch(request.url, {
+    method: "POST", headers: request.headers, body: canonicalJson(body),
+    redirect: request.redirect, signal: AbortSignal.timeout(8000)
   });
   if (!response.ok) return null;
   return response.json();
