@@ -1,5 +1,6 @@
+import { trialMutation, trialMutationPreviewEnabled } from './trial.js';
 import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
-import {parseCookie,checkEntitlement,checkScopedAdmin} from "../sso/session.js";
+import {parseCookie,currentEntitlementMode,checkScopedAdmin} from "../sso/session.js";
 import {rentalDatabaseUrl} from './db-config.js';
 const names={properties:"rental_properties",leases:"rental_leases",payments:"rental_payments",tickets:"rental_tickets"};
 const fields={
@@ -25,11 +26,23 @@ export default async function handler(req,res){
  if(!origin||!host)return res.status(403).json({error:"Same-origin request required"});
  try { const u=new URL(origin);if(u.protocol!=="https:"||u.host!==host||u.username||u.password)return res.status(403).json({error:"Origin denied"}); }catch{return res.status(403).json({error:"Origin denied"});}
  const table=names[req.query?.resource],resource=req.query?.resource,org=req.query?.organization_id;
- if(!table||typeof org!=="string"||!uuid.test(org))return res.status(400).json({error:"Invalid resource or organization"});
+ if(!Object.hasOwn(names,resource)||typeof org!=="string"||!uuid.test(org))return res.status(400).json({error:"Invalid resource or organization"});
  const sid=parseCookie(req);
  if(!sid)return res.status(401).json({error:"Login required"});
  try{
-  if(!(await checkEntitlement(sid)))return res.status(403).json({error:"Subscription denied"});
+  const mode=await currentEntitlementMode(sid);
+  if(!mode)return res.status(403).json({error:"Subscription denied"});
+  if(mode==='trial') {
+   if(!trialMutationPreviewEnabled()||req.method!=='POST')return res.status(403).json({error:"Trial access denied"});
+   const operation=req.headers['idempotency-key'];
+   if(typeof operation!=='string'||!uuid.test(operation))return res.status(400).json({error:"Idempotency key required"});
+   const result=await trialMutation('myops_rental_trial_create',{
+    p_session:sid,p_org:org,p_operation:operation,p_kind:resource,p_input:req.body
+   },res);
+   if(!result)return;
+   if(!result.item)throw Error("Invalid trial result");
+   return res.status(result.replayed?200:201).json({item:result.item});
+  }
   const sessions=await query("myops_app_sessions",{id:sid,app_id:"opsrental"});
   const session=sessions.find(s=>s.revoked_at===null&&s.product_slug==="opsrental");
   if(!session||!uuid.test(session.user_id))return res.status(403).json({error:"Invalid session"});

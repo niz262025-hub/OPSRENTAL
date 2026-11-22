@@ -70,3 +70,68 @@ test('partial failures retain metadata for retry and incomplete files cannot be 
   process.env.MYOPS_RENTAL_ACCESS_DISABLED='true';assert.equal((await req('GET','download',{},doc.id)).code,503);
  }finally{globalThis.fetch=original;process.env=old;}
 });
+
+test('isolated trial upload retries an uncertain immutable write and finalizes once', async()=>{
+ const old={...process.env}, original=globalThis.fetch, {privateKey}=generateKeyPairSync('ed25519');
+ Object.assign(process.env,{
+  VERCEL_ENV:'preview',
+  MYOPS_API_ORIGIN:'https://southerndotcom-website-git-feat-myop-ca0019-mohd-syaiful-nizam1.vercel.app',
+  MYOPS_RENTAL_SUPABASE_URL:'https://wengxxiqwtosirealghx.supabase.co',
+  MYOPS_RENTAL_SERVICE_ROLE_KEY:'synthetic',
+  MYOPS_RENTAL_SESSION_SECRET:'synthetic-secret-12345678901234567890',
+  MYOPS_APP_PRIVATE_KEY:privateKey.export({type:'pkcs8',format:'pem'}).toString()
+ });
+ delete process.env.MYOPS_RENTAL_TRIAL_MUTATION_UAT;
+ const body=Buffer.from(JSON.stringify({sid,exp:Date.now()+60000})).toString('base64url');
+ const mac=createHmac('sha256',process.env.MYOPS_RENTAL_SESSION_SECRET).update(body).digest('base64url');
+ const documentId='00000000-0000-4000-8000-000000000005';
+ const headers={cookie:`__Host-opsrental-session=${body}.${mac}`,origin:'https://rental.example',host:'rental.example','idempotency-key':documentId};
+ const path=org+'/'+documentId, content='%PDF-synthetic';
+ const file={property_id:prop,filename:'file.pdf',mime_type:'application/pdf',content_base64:Buffer.from(content).toString('base64')};
+ let stored=null, readsUnavailable=true, completed=false, writes=0, finalized=0;
+ globalThis.fetch=async (url,opts={})=>{
+  const p=new URL(url).pathname;
+  if(p==='/api/app/entitlement')return Response.json({entitled:true,session_active:true,access_mode:'trial'});
+  if(p.endsWith('/myops_app_sessions'))return Response.json([{user_id:user,revoked_at:null,product_slug:'opsrental'}]);
+  if(p.endsWith('/myops_memberships'))return Response.json([{role:'owner'}]);
+  if(p.endsWith('/rental_properties'))return Response.json([{id:prop}]);
+  if(p.endsWith('/bucket/opsrental-private'))return Response.json({id:'opsrental-private',public:false});
+  if(p.endsWith('/rpc/myops_rental_trial_upload')){
+   const args=JSON.parse(opts.body);
+   assert.equal(args.p_operation,documentId);
+   assert.equal(args.p_org,org);
+   if(args.p_finalize){assert.equal(stored.toString(),content);finalized++;completed=true;}
+   if(completed)return Response.json({status:'completed',item:{id:documentId}});
+   return Response.json({status:'uploading',document_id:documentId,storage_path:path});
+  }
+  if(p==='/storage/v1/object/opsrental-private/'+path){
+   assert.equal(opts.headers['x-upsert'],'false');
+   if(stored)return new Response(null,{status:409});
+   writes++;
+   stored=opts.body;
+   throw Error('Response lost after Storage committed');
+  }
+  if(p==='/storage/v1/object/authenticated/opsrental-private/'+path) {
+   return readsUnavailable?new Response(null,{status:503}):new Response(stored);
+  }
+  assert.fail('Unexpected request '+p);
+ };
+ const request=async()=>{
+  const res=response();
+  await handler({method:'POST',headers,query:{action:'upload',organization_id:org},body:file},res);
+  return res;
+ };
+ try{
+  assert.equal((await request()).code,403);
+  assert.equal(writes,0);
+  process.env.MYOPS_RENTAL_TRIAL_MUTATION_UAT='true';
+  assert.equal((await request()).code,503);
+  assert.equal(writes,1);
+  assert.equal(finalized,0);
+  readsUnavailable=false;
+  assert.equal((await request()).code,201);
+  assert.equal((await request()).code,200);
+  assert.equal(writes,1);
+  assert.equal(finalized,1);
+ }finally{globalThis.fetch=original;process.env=old;}
+});

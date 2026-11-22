@@ -36,11 +36,15 @@ async function entitlementResponse(sid, organizationId) {
   if (!response.ok) return null;
   return response.json();
 }
-export async function checkEntitlement(sid) {
+export async function currentEntitlementMode(sid) {
   const result = await entitlementResponse(sid);
-  // Do not admit trial access until all chargeable mutations use the atomic
-  // central quota contract, even if the broker is configured prematurely.
-  return result?.entitled === true && result.session_active === true && result.access_mode !== 'trial';
+  if (result?.entitled !== true || result.session_active !== true) return null;
+  return result.access_mode ?? 'paid';
+}
+export async function checkEntitlement(sid) {
+  // General access remains closed to trial sessions while isolated mutations are tested.
+  const mode = await currentEntitlementMode(sid);
+  return mode !== null && mode !== 'trial';
 }
 export async function checkScopedAdmin(sid, organizationId) {
   const result = await entitlementResponse(sid, organizationId);

@@ -1,7 +1,8 @@
+import { trialMutation, trialMutationPreviewEnabled } from './trial.js';
 import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
-import { parseCookie, checkEntitlement, checkScopedAdmin } from '../sso/session.js';
+import { parseCookie, currentEntitlementMode, checkScopedAdmin } from '../sso/session.js';
 import { rentalDatabaseUrl } from './db-config.js';
-import {createHmac,timingSafeEqual} from 'node:crypto';
+import {createHash,createHmac,timingSafeEqual} from 'node:crypto';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Base64 and JSON must fit within Vercel's request limit.
@@ -57,15 +58,19 @@ export default async function handler(req,res){
  if(!sid)return deny(res,401,'MYOPS session required');
  if(typeof org!=='string'||!UUID.test(org))return deny(res,400,'Valid organization required');
  try{
-  if(!(await checkEntitlement(sid)))return deny(res,403,'Session entitlement denied');
+  const mode=await currentEntitlementMode(sid);
+  const action=req.query?.action||'list';
+  if(!mode || (mode==='trial' && (!trialMutationPreviewEnabled() || req.method!=='POST' || action!=='upload'))) {
+   return deny(res,403,'Session entitlement denied');
+  }
   const sessions=await rows('myops_app_sessions',{id:sid,app_id:'opsrental'});
   const session=sessions.find(s=>s.revoked_at===null&&s.product_slug==='opsrental'&&UUID.test(s.user_id));
   if(!session)return deny(res,403,'Session revoked or invalid');
   const membership=await rows('myops_memberships',{user_id:session.user_id,organization_id:org,status:'active'});
   const role=membership[0]?.role;
   if(!['owner','admin','manager'].includes(role))return deny(res,403,'Document manager access required');
-  if(!((await organizationEntitled(rows,session.user_id,org) || await checkScopedAdmin(sid,org))))return deny(res,403,'Organization entitlement denied');
-  const id=req.query?.id,action=req.query?.action||'list';
+  if(mode!=='trial' && !(await organizationEntitled(rows,session.user_id,org) || await checkScopedAdmin(sid,org)))return deny(res,403,'Organization entitlement denied');
+  const id=req.query?.id;
   if(req.method==='GET'&&action==='list'){
    const docs=await rows('rental_documents',{organization_id:org});
    return res.status(200).json({items:docs.map(d=>({id:d.id,filename:d.filename,lease_id:d.lease_id,property_id:d.property_id,state:d.state,created_at:d.created_at}))});
@@ -84,6 +89,31 @@ export default async function handler(req,res){
    if(!(await rows(target[0],{id:target[1],organization_id:org})).length)return deny(res,403,'Association not in organization');
    const bucketInfo=await (await call('/storage/v1/bucket/'+bucket)).json();
    if(bucketInfo.id!==bucket || bucketInfo.public!==false)return deny(res,503,'Private storage unavailable');
+   if(mode==='trial'){
+    const operation=req.headers['idempotency-key'];
+    if(typeof operation!=='string'||!UUID.test(operation))return deny(res,400,'Idempotency key required');
+    const digest=createHash('sha256').update(bytes).digest('hex');
+    const args={p_session:sid,p_org:org,p_operation:operation,p_filename:filename,
+     p_property:property_id||null,p_lease:lease_id||null,p_sha256:digest};
+    const reserve=await trialMutation('myops_rental_trial_upload',args,res);
+    if(!reserve)return;
+    if(reserve.status==='completed' && UUID.test(reserve.item?.id||'')){
+     return res.status(200).json({item:{id:reserve.item.id,filename,lease_id:lease_id||null,property_id:property_id||null}});
+    }
+    const fileId=reserve.document_id,path=org+'/'+fileId;
+    if(reserve.status!=='uploading'||!UUID.test(fileId||'')||reserve.storage_path!==path)throw Error('Invalid trial reservation');
+    // No upserts. After an uncertain upload, compare the immutable object
+    // before finalizing the original reservation.
+    try {await call('/storage/v1/object/'+bucket+'/'+path,'POST',bytes,{'content-type':mime_type,'x-upsert':'false','cache-control':'max-age=0, no-store'});}
+    catch { /* Storage can commit even when its response is lost. */ }
+    const stored=await call('/storage/v1/object/authenticated/'+bucket+'/'+path);
+    const storedDigest=createHash('sha256').update(Buffer.from(await stored.arrayBuffer())).digest('hex');
+    if(storedDigest!==digest)throw Error('Trial document content mismatch');
+    const completed=await trialMutation('myops_rental_trial_upload',{...args,p_finalize:true},res);
+    if(!completed)return;
+    if(completed.status!=='completed'||completed.item?.id!==fileId)throw Error('Trial upload not completed');
+    return res.status(completed.replayed?200:201).json({item:{id:fileId,filename,lease_id:lease_id||null,property_id:property_id||null}});
+   }
    const fileId=crypto.randomUUID(),path=org+'/'+fileId;
    // Reserve metadata first: a failed or uncertain Storage call remains traceable.
    const saved=await rows('rental_documents',{},'POST',{id:fileId,organization_id:org,lease_id:lease_id||null,property_id:property_id||null,uploaded_by:session.user_id,filename,storage_path:path,state:'pending'});
