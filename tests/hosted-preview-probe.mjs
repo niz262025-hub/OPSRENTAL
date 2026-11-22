@@ -21,6 +21,7 @@ async function authenticatedLaunch(browser, fixture) {
       const response = await route.fetch({
         headers: { ...route.request().headers(), 'x-vercel-protection-bypass': secret },
         maxRedirects: 0,
+        timeout: 15000,
       });
       try {
         await route.fulfill({ response });
@@ -95,7 +96,7 @@ async function authenticatedLaunch(browser, fixture) {
   } catch {
     throw new Error(`${fixture.label}: authenticated launch failed; see status-only evidence`);
   } finally {
-    await context.unrouteAll({ behavior: 'wait' });
+    await context.unrouteAll({ behavior: 'ignoreErrors' });
     await context.close();
   }
 }
@@ -125,7 +126,7 @@ async function probe(browser, label) {
     assert.deepEqual(await response.json(), { error: 'MYOPS session required' });
     console.log(`${label}: application-level signed-out denial verified`);
   } finally {
-    await context.unrouteAll({ behavior: 'wait' });
+    await context.unrouteAll({ behavior: 'ignoreErrors' });
     await context.close();
   }
 }
