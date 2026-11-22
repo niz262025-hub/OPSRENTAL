@@ -16,12 +16,17 @@ async function authenticatedLaunch(browser, fixture) {
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
+    let routeFailed = false;
     await context.route(url => url.origin === target.origin, async route => {
       const response = await route.fetch({
         headers: { ...route.request().headers(), 'x-vercel-protection-bypass': secret },
         maxRedirects: 0,
       });
-      await route.fulfill({ response });
+      try {
+        await route.fulfill({ response });
+      } catch (error) {
+        if (!error.message.includes('Route is already handled!')) routeFailed = true;
+      }
     });
     page.on('response', response => {
       const url = new URL(response.url());
@@ -85,6 +90,7 @@ async function authenticatedLaunch(browser, fixture) {
     const query = new URLSearchParams({ organization_id: organizationId, action: 'list' });
     const docs = await readRental(`/api/rental/documents?${query}`, 'own_document_list');
     assert.ok(Array.isArray(docs.items) && docs.items.every(item => !Object.hasOwn(item, 'storage_path')));
+    assert.equal(routeFailed, false);
     return organizationId;
   } catch {
     throw new Error(`${fixture.label}: authenticated launch failed; see status-only evidence`);
