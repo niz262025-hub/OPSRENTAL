@@ -13,6 +13,28 @@ const fixtures = ['A', 'B'].map(label => ({
   password: process.env[`OPSRENTAL_UAT_ORG_${label}_PASSWORD`],
 }));
 
+// Synchronize disposable objects so each account can probe the other tenant's
+// document without touching the two original staging documents.
+function createRendezvous(timeoutMs = 30000) {
+  const values = new Map();
+  let resolve;
+  const ready = new Promise(r => { resolve = r; });
+  return async (label, value) => {
+    if (values.has(label)) throw new Error('Duplicate fixture');
+    values.set(label, value);
+    if (values.size === 2) resolve();
+    let timer;
+    try {
+      await Promise.race([ready, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Fixture rendezvous timed out')), timeoutMs);
+      })]);
+      return values.get(label === 'A' ? 'B' : 'A');
+    } finally { clearTimeout(timer); }
+  };
+}
+const shareDisposable = createRendezvous();
+const finishCrossTenant = createRendezvous();
+
 async function authenticatedLaunch(browser, fixture) {
   const context = await browser.newContext();
   try {
@@ -129,6 +151,24 @@ async function authenticatedLaunch(browser, fixture) {
         assert.equal(response.status(), 200);
         assert.ok((await response.body()).equals(contents));
       }
+      const other = await shareDisposable(fixture.label, { organizationId, id: disposableId });
+      for (const [org, expected] of [[organizationId, 404], [other.organizationId, 403]]) {
+        for (const [action, method] of [['view', 'GET'], ['delete', 'DELETE']]) {
+          const url = new URL('/api/rental/documents', target.origin);
+          url.search = new URLSearchParams({ organization_id: org, action, id: other.id });
+          const denied = await context.request.fetch(url.href, {
+            method, maxRedirects: 0, timeout: 25000,
+            headers: { origin: target.origin, 'x-vercel-protection-bypass': secret },
+          });
+          console.log(JSON.stringify({ context: fixture.label, check: `cross_tenant_${action}`, scope: org === organizationId ? 'own_org' : 'other_org', status: denied.status() }));
+          assert.equal(denied.status(), expected);
+        }
+      }
+      await finishCrossTenant(fixture.label, true);
+      const unchanged = await documentRequest('view', 'GET', disposableId);
+      assert.equal(unchanged.status(), 200);
+      assert.ok((await unchanged.body()).equals(contents));
+      console.log(`${fixture.label}: disposable document unchanged after cross-tenant attempts`);
     } finally {
       if (disposableId) {
         const deleted = await documentRequest('delete', 'DELETE', disposableId);
