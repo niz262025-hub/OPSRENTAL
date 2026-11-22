@@ -38,7 +38,18 @@ async function authenticatedLaunch(browser, fixture) {
       const response = await context.request.post(central + '/api/auth', {
         headers, data: { action, ...payload }, maxRedirects: 0,
       });
-      console.log(JSON.stringify({ context: fixture.label, action, status: response.status() }));
+      let outcome = 'ok';
+      if (!response.ok()) {
+        const body = await response.json().catch(() => null);
+        if (body?.error === 'Invalid credentials or email not confirmed.') {
+          outcome = 'application_login_rejected';
+        } else if (response.status() === 401 && !body) {
+          outcome = 'non_json_unauthorized';
+        } else {
+          outcome = 'request_rejected';
+        }
+      }
+      console.log(JSON.stringify({ context: fixture.label, action, status: response.status(), outcome }));
       assert.equal(response.status(), 200);
       return response;
     }
