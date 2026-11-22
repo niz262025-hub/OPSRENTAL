@@ -60,3 +60,53 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 --file "$GITHUB_WORKSPACE/tests/storage-uat/fixture.sql" >/dev/null
           cd "$GITHUB_WORKSPACE"
           node --test tests/storage-uat/real-storage.test.mjs
+
+  hosted-preview-probe:
+    if: github.event_name == 'workflow_dispatch' && github.repository_id == '1458090679' && github.ref == 'refs/heads/fix/rental-central-return-navigation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Verify protected Preview and signed-out application denial
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from urllib.error import HTTPError, URLError
+          from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+          class RefuseRedirects(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          secret = os.environ.get("VERCEL_AUTOMATION_BYPASS_SECRET")
+          print("Actions secret available to this workflow:", bool(secret))
+          if not secret:
+              raise SystemExit("Staging automation secret is unavailable.")
+
+          url = "https://opsrental-staging-bytplywc7-mohd-syaiful-nizam1.vercel.app/api/rental/documents"
+          request = Request(url, headers={
+              "Accept": "application/json",
+              "x-vercel-protection-bypass": secret,
+          })
+          try:
+              response = build_opener(RefuseRedirects).open(request, timeout=20)
+          except HTTPError as error:
+              response = error
+          except (URLError, TimeoutError):
+              raise SystemExit("OpsRental Preview request failed before an HTTP response.") from None
+
+          with response:
+              status = response.code
+              try:
+                  body = json.loads(response.read(8192))
+              except (ValueError, UnicodeError):
+                  body = None
+
+          app_denied = status == 401 and body == {"error": "MYOPS session required"}
+          print(f"OpsRental documents HTTP {status}; application session denial verified: {app_denied}")
+          if not app_denied:
+              raise SystemExit("Expected authenticated Vercel access and an application-level session denial.")
+          PY
