@@ -22,17 +22,14 @@ GRANT SELECT,INSERT,UPDATE ON public.myops_rental_trial_operations TO service_ro
 
 -- The validated session is checked inside the same transaction as the mutation.
 -- Only the trusted service role may invoke this RPC. JSON fields are allowlisted.
-CREATE FUNCTION public.myops_rental_trial_create(p_session uuid,p_org uuid,p_operation uuid,p_kind text,p_input jsonb)
-RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
-DECLARE s jsonb; t public.myops_trials%rowtype; old_op public.myops_rental_trial_operations%rowtype;
- used integer; row_data jsonb; valid_fields text[];
+CREATE FUNCTION public.myops_rental_lock_trial(p_session uuid,p_org uuid)
+RETURNS public.myops_trials LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+DECLARE s jsonb; t public.myops_trials%rowtype;
 BEGIN
- IF p_session IS NULL OR p_org IS NULL OR p_operation IS NULL OR jsonb_typeof(p_input) IS DISTINCT FROM 'object' THEN
-  RAISE EXCEPTION 'Invalid operation' USING ERRCODE='22023'; END IF;
  s:=public.myops_validate_app_session(p_session,'opsrental','opsrental',false);
  IF s->>'active' IS DISTINCT FROM 'true' OR s->>'user_id' IS NULL THEN RAISE EXCEPTION 'Session denied' USING ERRCODE='42501'; END IF;
  SELECT * INTO t FROM public.myops_trials WHERE user_id=(s->>'user_id')::uuid FOR UPDATE;
- IF NOT FOUND OR t.status<>'active' OR t.policy_version<>1 OR t.started_at>now() OR t.expires_at<=now() OR t.expires_at<>t.started_at+interval '168 hours' THEN
+ IF NOT FOUND OR t.status<>'active' OR t.policy_version<>1 OR t.started_at>clock_timestamp() OR t.expires_at<=clock_timestamp() OR t.expires_at<>t.started_at+interval '168 hours' THEN
   RAISE EXCEPTION 'Trial inactive' USING ERRCODE='42501'; END IF;
  IF (t.organization_id IS NOT NULL AND t.organization_id<>p_org)
   OR NOT EXISTS (SELECT 1 FROM public.myops_organizations WHERE id=p_org AND owner_user_id=t.user_id)
@@ -41,6 +38,19 @@ BEGIN
   RAISE EXCEPTION 'Organization denied' USING ERRCODE='42501'; END IF;
  IF EXISTS (SELECT 1 FROM public.myops_rental_trial_operations WHERE trial_id=t.id AND organization_id<>p_org) THEN
   RAISE EXCEPTION 'Trial organization already bound' USING ERRCODE='42501'; END IF;
+ RETURN t;
+END $$;
+REVOKE ALL ON FUNCTION public.myops_rental_lock_trial(uuid,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.myops_rental_lock_trial(uuid,uuid) TO service_role;
+
+CREATE FUNCTION public.myops_rental_trial_create(p_session uuid,p_org uuid,p_operation uuid,p_kind text,p_input jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+DECLARE t public.myops_trials%rowtype; old_op public.myops_rental_trial_operations%rowtype;
+ used integer; row_data jsonb; valid_fields text[];
+BEGIN
+ IF p_session IS NULL OR p_org IS NULL OR p_operation IS NULL OR jsonb_typeof(p_input) IS DISTINCT FROM 'object' THEN
+  RAISE EXCEPTION 'Invalid operation' USING ERRCODE='22023'; END IF;
+ t:=public.myops_rental_lock_trial(p_session,p_org);
  valid_fields:=CASE p_kind WHEN 'properties' THEN ARRAY['name','address','unit_label','parking_spaces']
   WHEN 'leases' THEN ARRAY['property_id','tenant_user_id','monthly_rent','currency','start_date','end_date','status','parking_spaces']
   WHEN 'payments' THEN ARRAY['lease_id','amount','due_date','paid_at','status','reference']
