@@ -7,7 +7,7 @@
     const text = document.createElement("p");
     text.textContent = message;
     const link = document.createElement("a");
-    link.href = "https://www.myops.com.my/";
+    link.href = "/api/sso/return";
     link.textContent = "Return to MYOPS";
     panel.append(text, link);
     gate.append(panel);
