@@ -33,6 +33,7 @@ test('atomic trial SQL rejects 31st operation, deduplicates and rolls back faile
   await db.query("insert into public.myops_app_sessions values($1,'opsrental','opsrental',null)",[session]);
   await db.exec(await readFile(new URL('../supabase/migrations/20261124082735_rental_bound_trial_session.sql',import.meta.url),'utf8'));
   await assert.rejects(db.query('select myops_rental_trial_create($1,$2,$3,$4,$5::jsonb)',[session,id(999),id(50),'properties',JSON.stringify({name:'Synthetic',address:'Example'})]),/Organization denied/);
+  assert.equal((await db.query('select (myops_rental_lock_trial($1,$2)).id as id',[session,org])).rows[0].id,trial);
   await db.query('update mock_session set organization_id=$1 where id=$2',[org,session]);
   await db.query('update public.myops_app_sessions set organization_id=$1 where id=$2',[org,session]);
   await assert.rejects(db.query('select myops_rental_lock_trial($1,$2)',[session,id(999)]),/Organization denied/);
