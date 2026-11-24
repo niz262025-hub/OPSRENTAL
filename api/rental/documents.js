@@ -1,6 +1,6 @@
 import { trialMutation, trialMutationPreviewEnabled } from './trial.js';
 import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
-import { parseCookie, currentEntitlementMode, checkScopedAdmin } from '../sso/session.js';
+import { parseSession, organizationMatches, boundOrganizationEnabled, currentEntitlementMode, checkScopedAdmin } from '../sso/session.js';
 import { rentalDatabaseUrl } from './db-config.js';
 import {createHash,createHmac,timingSafeEqual} from 'node:crypto';
 
@@ -54,11 +54,12 @@ export default async function handler(req,res){
  if(rentalAccessDisabled())return deny(res,503,'Rental access disabled');
  if(!['GET','POST','DELETE'].includes(req.method))return deny(res,405,'Method not allowed');
  if(req.method!=='GET'&&!sameOrigin(req))return deny(res,403,'Same-origin required');
- const sid=parseCookie(req),org=req.query?.organization_id;
+ const claims=parseSession(req),sid=claims?.sid,org=req.query?.organization_id;
  if(!sid)return deny(res,401,'MYOPS session required');
  if(typeof org!=='string'||!UUID.test(org))return deny(res,400,'Valid organization required');
+ if(!organizationMatches(claims,org))return deny(res,403,'Organization denied');
  try{
-  const mode=await currentEntitlementMode(sid);
+  const mode=await currentEntitlementMode(sid,claims.org);
   const action=req.query?.action||'list';
   if(!mode || (mode==='trial' && (!trialMutationPreviewEnabled() || req.method!=='POST' || action!=='upload'))) {
    return deny(res,403,'Session entitlement denied');
@@ -66,6 +67,7 @@ export default async function handler(req,res){
   const sessions=await rows('myops_app_sessions',{id:sid,app_id:'opsrental'});
   const session=sessions.find(s=>s.revoked_at===null&&s.product_slug==='opsrental'&&UUID.test(s.user_id));
   if(!session)return deny(res,403,'Session revoked or invalid');
+  if(boundOrganizationEnabled()&&session.organization_id!==claims.org)return deny(res,403,'Organization denied');
   const membership=await rows('myops_memberships',{user_id:session.user_id,organization_id:org,status:'active'});
   const role=membership[0]?.role;
   if(!['owner','admin','manager'].includes(role))return deny(res,403,'Document manager access required');

@@ -1,5 +1,5 @@
 import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
-import { parseCookie, checkEntitlement, checkScopedAdmin } from "../sso/session.js";
+import { parseSession, organizationMatches, boundOrganizationEnabled, checkEntitlement, checkScopedAdmin } from "../sso/session.js";
 import { rentalDatabaseUrl } from './db-config.js';
 const tables = Object.freeze({
   properties: "rental_properties", leases: "rental_leases",
@@ -25,16 +25,17 @@ export default async function handler(req,res) {
   if (req.method !== "GET") return res.status(405).json({error:"Method not allowed"});
   const table = tables[req.query?.resource];
   if (!table) return res.status(400).json({error:"Unknown resource"});
-  const sid = parseCookie(req);
+  const claims = parseSession(req), sid = claims?.sid;
   if (!sid) return res.status(401).json({error:"MYOPS session required"});
   try {
-    if (!(await checkEntitlement(sid))) return res.status(403).json({error:"Subscription or session denied"});
+    if (!(await checkEntitlement(sid, claims.org))) return res.status(403).json({error:"Subscription or session denied"});
     const sessions = await db("myops_app_sessions", { id:sid, app_id:"opsrental" });
     const session = sessions.find(x=>x.revoked_at === null && x.product_slug === "opsrental");
     if (!session || !UUID.test(session.user_id)) return res.status(403).json({error:"Session denied"});
     const memberships = await db("myops_memberships", { user_id:session.user_id, status:"active" });
     const requestedOrg = req.query?.organization_id;
     if (typeof requestedOrg !== "string" || !UUID.test(requestedOrg)) return res.status(400).json({error:"Organization required"});
+    if (!organizationMatches(claims, requestedOrg) || (boundOrganizationEnabled() && session.organization_id !== claims.org)) return res.status(403).json({error:"Organization denied"});
     const member = memberships.find(m=>m.organization_id === requestedOrg);
     const manager = member && ["owner","admin","manager"].includes(member.role);
     if (!manager && table === "rental_documents") return res.status(403).json({error:"Not authorized"});

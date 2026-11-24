@@ -1,6 +1,7 @@
 import { rentalAccessDisabled } from '../rental/authorization.js';
 import { createPrivateKey, randomBytes, createHash, sign, createHmac } from "node:crypto";
 import { myopsBrokerRequest } from './myops-origin.js';
+import { boundOrganizationEnabled } from './session.js';
 const TICKET = /^[A-Za-z0-9_-]{43}$/;
 function canonicalJson(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -54,13 +55,14 @@ export default async function handler(req, res) {
     if (!upstream.ok) return res.status(upstream.status === 401 || upstream.status === 403 ? upstream.status : 503).json({ error: "MYOPS ticket rejected or unavailable" });
     const payload = await upstream.json();
     if (payload.product !== "opsrental" || !payload.session_id || !payload.user_ref) throw new Error("invalid_response");
+    if (boundOrganizationEnabled() && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.organization_id || '')) throw new Error('invalid_organization');
     // Bind the one-time MYOPS ticket to an opaque, HttpOnly app session.
     // The session is rechecked against MYOPS on every protected request.
     const secret = process.env.MYOPS_RENTAL_SESSION_SECRET;
     if (!secret || Buffer.byteLength(secret) < 32 || !/^[0-9a-f-]{36}$/i.test(payload.session_id)) {
       return res.status(503).json({ error: "Session configuration unavailable" });
     }
-    const body = Buffer.from(JSON.stringify({ sid: payload.session_id, exp: Date.now() + 12 * 3600000 })).toString("base64url");
+    const body = Buffer.from(JSON.stringify({ sid: payload.session_id, exp: Date.now() + 12 * 3600000, ...(boundOrganizationEnabled() ? { org: payload.organization_id.toLowerCase() } : {}) })).toString("base64url");
     const mac = createHmac("sha256", secret).update(body).digest("base64url");
     res.setHeader("Set-Cookie", `__Host-opsrental-session=${body}.${mac}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200`);
     return res.status(200).json({ verified: true, product: "opsrental", next: "/" });

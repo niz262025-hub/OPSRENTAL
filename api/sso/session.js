@@ -2,7 +2,8 @@ import { rentalAccessDisabled } from '../rental/authorization.js';
 import { createHmac, timingSafeEqual, createPrivateKey, createHash, randomBytes, sign } from "node:crypto";
 import { myopsBrokerRequest } from './myops-origin.js';
 const cookieName = "__Host-opsrental-session";
-export function parseCookie(req) {
+export function boundOrganizationEnabled() { return process.env.VERCEL_ENV === 'preview' && process.env.MYOPS_RENTAL_ORGANIZATION_BOUND === 'true'; }
+export function parseSession(req) {
   const value = (req.headers.cookie || "").split(";").map(x => x.trim()).find(x => x.startsWith(cookieName + "="))?.slice(cookieName.length + 1);
   const [body, mac, extra] = (value || "").split(".");
   const secret = process.env.MYOPS_RENTAL_SESSION_SECRET;
@@ -13,8 +14,13 @@ export function parseCookie(req) {
   try {
     const data = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
     if (!/^[0-9a-f-]{36}$/i.test(data.sid) || !Number.isSafeInteger(data.exp) || data.exp <= Date.now()) return null;
-    return data.sid;
+    if (boundOrganizationEnabled() && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.org || '')) return null;
+    return { sid: data.sid, org: data.org?.toLowerCase() ?? null };
   } catch { return null; }
+}
+export function parseCookie(req) { return parseSession(req)?.sid ?? null; }
+export function organizationMatches(session, organizationId) {
+  return !boundOrganizationEnabled() || (session?.org && typeof organizationId === 'string' && session.org === organizationId.toLowerCase());
 }
 function canonicalJson(obj) { return JSON.stringify(Object.fromEntries(Object.entries(obj).sort(([a],[b])=>a.localeCompare(b)))); }
 async function entitlementResponse(sid, organizationId, activity = false) {
@@ -37,14 +43,16 @@ async function entitlementResponse(sid, organizationId, activity = false) {
   if (!response.ok) return null;
   return response.json();
 }
-export async function currentEntitlementMode(sid) {
-  const result = await entitlementResponse(sid);
+export async function currentEntitlementMode(sid, organizationId = null) {
+  if (boundOrganizationEnabled() && !organizationId) return null;
+  const result = await entitlementResponse(sid, boundOrganizationEnabled() ? organizationId : null);
   if (result?.entitled !== true || result.session_active !== true) return null;
+  if (boundOrganizationEnabled() && result.organization_id !== organizationId) return null;
   return result.access_mode ?? 'paid';
 }
-export async function checkEntitlement(sid) {
+export async function checkEntitlement(sid, organizationId = null) {
   // General access remains closed to trial sessions while isolated mutations are tested.
-  const mode = await currentEntitlementMode(sid);
+  const mode = await currentEntitlementMode(sid, organizationId);
   return mode !== null && mode !== 'trial';
 }
 export async function checkScopedAdmin(sid, organizationId) {
@@ -66,13 +74,13 @@ export default async function handler(req,res) {
       || req.headers['sec-fetch-site'] !== 'same-origin')) {
     return res.status(403).json({ authenticated:false });
   }
-  const sid = parseCookie(req);
+  const session = parseSession(req), sid = session?.sid;
   if (!sid) return res.status(401).json({ authenticated:false });
   try {
-    if (!(await checkEntitlement(sid))) return res.status(403).json({ authenticated:false });
+    if (!(await checkEntitlement(sid, session.org))) return res.status(403).json({ authenticated:false });
     if (activity) {
-      const touched = await entitlementResponse(sid, undefined, true);
-      if (touched?.entitled !== true || touched.session_active !== true || touched.access_mode === 'trial') {
+      const touched = await entitlementResponse(sid, boundOrganizationEnabled() ? session.org : undefined, true);
+      if (touched?.entitled !== true || touched.session_active !== true || touched.access_mode === 'trial' || (boundOrganizationEnabled() && touched.organization_id !== session.org)) {
         return res.status(403).json({ authenticated:false });
       }
     }

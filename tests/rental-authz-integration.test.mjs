@@ -14,13 +14,13 @@ test('API requires active central session and membership, and rejects foreign pr
  const body=Buffer.from(JSON.stringify({sid,exp:Date.now()+60000})).toString('base64url');
  const mac=createHmac('sha256',process.env.MYOPS_RENTAL_SESSION_SECRET).update(body).digest('base64url');
  const headers={cookie:`__Host-opsrental-session=${body}.${mac}`,origin:'https://rental.example',host:'rental.example'};
- let revoked=false, entitled=true, active=true, extraMembership=false, adminScope=null, accessMode='paid', role='manager', writes=[];
+ let revoked=false, entitled=true, active=true, extraMembership=false, adminScope=null, accessMode='paid', role='manager', writes=[], boundOrg=null;
  globalThis.fetch=async (url,options={})=>{
   const u=new URL(url);
-  if(u.pathname==='/api/app/entitlement'){ const request=JSON.parse(options.body); return {ok:true,json:async()=>({entitled,session_active:!revoked,access_mode:accessMode,...(request.organization_id && adminScope ? {access_mode:'admin',organization_id:adminScope} : {})})}; }
+  if(u.pathname==='/api/app/entitlement'){ const request=JSON.parse(options.body); return {ok:true,json:async()=>({entitled,session_active:!revoked,access_mode:accessMode,...(boundOrg ? {organization_id:boundOrg} : {}),...(request.organization_id && adminScope ? {access_mode:'admin',organization_id:adminScope} : {})})}; }
   const table=u.pathname.split('/').pop();
   let rows=[];
-  if(table==='myops_app_sessions')rows=[{id:sid,user_id:user,product_slug:'opsrental',revoked_at:revoked?'2026-01-01':null}];
+  if(table==='myops_app_sessions')rows=[{id:sid,user_id:user,product_slug:'opsrental',organization_id:boundOrg,revoked_at:revoked?'2026-01-01':null}];
   if(table==='myops_memberships'&&active){ rows=[{user_id:user,organization_id:orgA,status:'active',role}]; if(extraMembership)rows.push({user_id:user,organization_id:orgB,status:'active',role:'manager'}); if(u.searchParams.get('organization_id'))rows=rows.filter(m=>u.searchParams.get('organization_id')===`eq.${m.organization_id}`); }
   if(table==='myops_app_grants') rows=[{user_id:user,organization_id:orgA,product_slug:'opsrental'}];
   if(table==='myops_subscriptions') rows=[{organization_id:orgA,personal_user_id:null,status:'active',product_slug:'opsrental',current_period_end:null}];
@@ -52,5 +52,16 @@ test('API requires active central session and membership, and rejects foreign pr
   accessMode='trial'; assert.equal((await get(orgA)).statusCode,403); assert.equal((await post(orgA,{name:'Blocked trial'})).statusCode,403); accessMode='paid';
   revoked=true;assert.equal((await get(orgA)).statusCode,403);
   assert.equal(writes.length,2);
+  revoked=false; role='owner'; extraMembership=true; boundOrg=orgA;
+  process.env.MYOPS_RENTAL_ORGANIZATION_BOUND='true';
+  const scoped=Buffer.from(JSON.stringify({sid,org:orgA,exp:Date.now()+60000})).toString('base64url');
+  const scopedMac=createHmac('sha256',process.env.MYOPS_RENTAL_SESSION_SECRET).update(scoped).digest('base64url');
+  headers.cookie=`__Host-opsrental-session=${scoped}.${scopedMac}`;
+  assert.equal((await get(orgA)).statusCode,200);
+  assert.equal((await get(orgB)).statusCode,403);
+  assert.equal((await post(orgB,{name:'Wrong organization'})).statusCode,403);
+  boundOrg=orgB; assert.equal((await get(orgA)).statusCode,403);
+  assert.equal(writes.length,2);
+
  } finally {globalThis.fetch=originalFetch;process.env=old;}
 });

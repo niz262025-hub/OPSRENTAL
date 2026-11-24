@@ -1,6 +1,6 @@
 import { trialMutation, trialMutationPreviewEnabled } from './trial.js';
 import { organizationEntitled, rentalAccessDisabled } from './authorization.js';
-import {parseCookie,currentEntitlementMode,checkScopedAdmin} from "../sso/session.js";
+import {parseSession,organizationMatches,boundOrganizationEnabled,currentEntitlementMode,checkScopedAdmin} from "../sso/session.js";
 import {rentalDatabaseUrl} from './db-config.js';
 const names={properties:"rental_properties",leases:"rental_leases",payments:"rental_payments",tickets:"rental_tickets"};
 const fields={
@@ -27,10 +27,11 @@ export default async function handler(req,res){
  try { const u=new URL(origin);if(u.protocol!=="https:"||u.host!==host||u.username||u.password)return res.status(403).json({error:"Origin denied"}); }catch{return res.status(403).json({error:"Origin denied"});}
  const table=names[req.query?.resource],resource=req.query?.resource,org=req.query?.organization_id;
  if(!Object.hasOwn(names,resource)||typeof org!=="string"||!uuid.test(org))return res.status(400).json({error:"Invalid resource or organization"});
- const sid=parseCookie(req);
+ const claims=parseSession(req),sid=claims?.sid;
  if(!sid)return res.status(401).json({error:"Login required"});
+ if(!organizationMatches(claims,org))return res.status(403).json({error:"Organization denied"});
  try{
-  const mode=await currentEntitlementMode(sid);
+  const mode=await currentEntitlementMode(sid,claims.org);
   if(!mode)return res.status(403).json({error:"Subscription denied"});
   if(mode==='trial') {
    if(!trialMutationPreviewEnabled()||req.method!=='POST')return res.status(403).json({error:"Trial access denied"});
@@ -46,6 +47,7 @@ export default async function handler(req,res){
   const sessions=await query("myops_app_sessions",{id:sid,app_id:"opsrental"});
   const session=sessions.find(s=>s.revoked_at===null&&s.product_slug==="opsrental");
   if(!session||!uuid.test(session.user_id))return res.status(403).json({error:"Invalid session"});
+  if(boundOrganizationEnabled()&&session.organization_id!==claims.org)return res.status(403).json({error:"Organization denied"});
   const membership=await query("myops_memberships",{user_id:session.user_id,organization_id:org,status:"active"});
   if(!membership.some(m=>["owner","admin","manager"].includes(m.role)))return res.status(403).json({error:"Manager role required"});
   if(!((await organizationEntitled(query,session.user_id,org) || await checkScopedAdmin(sid,org))))return res.status(403).json({error:"Organization entitlement denied"});
