@@ -1,0 +1,65 @@
+name: OpsRental isolated Supabase replay
+on:
+  push:
+    branches: [staging/production-baseline]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Central dependencies
+        uses: actions/checkout@v4
+        with:
+          repository: niz262025-hub/southerndotcom-website
+          ref: 7822e95bb13f27b3e97b67c5004b04557585ea01
+          path: central-dependencies
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.54.11
+      - name: Start disposable Supabase
+        run: |
+          mkdir -p "$RUNNER_TEMP/opsrental-replay"
+          cd "$RUNNER_TEMP/opsrental-replay"
+          supabase init
+          supabase start
+      - name: Replay pinned Central dependencies and every Rental migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGHOST=127.0.0.1 PGPORT=54322 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=postgres
+          for file in \
+            migrations/202610160001_myops_identity_foundation.sql \
+            migrations/20261101104802_central_trial_7_day_foundation.sql \
+            migrations/20261101164633_central_trial_usage_limits.sql \
+            migrations/20261118044103_myops_mobile_sso_tables.sql \
+            migrations/20261125124355_production_parity_profile_logo_policies.sql \
+            proposals/phase3_founders_100.sql \
+            proposals/202610170001_myops_app_access.sql \
+            proposals/202610170002_myops_login_sessions.sql \
+            migrations/20261125175729_production_parity_mobile_security_constraints.sql \
+            proposals/20261118044103_myops_mobile_sso_rpcs.sql \
+            migrations/20261125192226_central_browser_role_noncrud_hardening.sql \
+            migrations/20261125193036_central_service_role_noncrud_hardening.sql
+          do
+            echo "Central dependency: $file"
+            psql -X -v ON_ERROR_STOP=1 -f "central-dependencies/supabase/$file"
+          done
+          psql -X -v ON_ERROR_STOP=1 -c "INSERT INTO storage.buckets(id,name,public,file_size_limit) VALUES ('opsrental-private','opsrental-private',false,3145728)"
+          count=$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l)
+          test "$count" -eq 6
+          for file in supabase/migrations/*.sql; do
+            echo "Rental migration: $file"
+            psql -X -v ON_ERROR_STOP=1 -f "$file"
+          done
+          psql -X -v ON_ERROR_STOP=1 -f scripts/assert-isolated-replay.sql
+      - name: Cleanup disposable Supabase
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/opsrental-replay/supabase/config.toml"; then
+            cd "$RUNNER_TEMP/opsrental-replay"
+            supabase stop --no-backup
+          fi
