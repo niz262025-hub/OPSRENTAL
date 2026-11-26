@@ -1,5 +1,6 @@
 const PRODUCTION = 'https://www.myops.com.my';
 const STAGING = 'https://southerndotcom-website-git-feat-myop-ca0019-mohd-syaiful-nizam1.vercel.app';
+const CENTRAL_105 = 'https://southerndotcom-website-git-fix-stagi-3dae88-mohd-syaiful-nizam1.vercel.app';
 
 // Preview must never send tickets or session checks to the production broker.
 export function myopsOrigin(env = process.env) {
@@ -8,8 +9,8 @@ export function myopsOrigin(env = process.env) {
     if (configured && configured !== PRODUCTION) throw new Error('Invalid production MYOPS origin');
     return PRODUCTION;
   }
-  if (configured !== STAGING) throw new Error('Staging MYOPS origin not configured');
-  return STAGING;
+  if (configured !== STAGING && configured !== CENTRAL_105) throw new Error('Staging MYOPS origin not configured');
+  return configured;
 }
 
 // Only the signed server-to-server requests use the Central Preview credential.

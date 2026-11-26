@@ -13,3 +13,10 @@ test('preview fails closed unless the approved staging broker is configured', ()
   assert.throws(() => myopsOrigin({ VERCEL_ENV: 'preview', MYOPS_API_ORIGIN: 'https://evil.example' }));
   assert.equal(myopsOrigin({ VERCEL_ENV: 'preview', MYOPS_API_ORIGIN: staging + '/' }), staging);
 });
+
+test('Central #105 is trusted as an exact staging broker origin', () => {
+  const origin = 'https://southerndotcom-website-git-fix-stagi-3dae88-mohd-syaiful-nizam1.vercel.app';
+  assert.equal(myopsOrigin({ VERCEL_ENV: 'preview', MYOPS_API_ORIGIN: origin }), origin);
+  assert.throws(() => myopsOrigin({ VERCEL_ENV: 'preview', MYOPS_API_ORIGIN: origin + '.example' }));
+  assert.throws(() => myopsOrigin({ VERCEL_ENV: 'production', MYOPS_API_ORIGIN: origin }));
+});
