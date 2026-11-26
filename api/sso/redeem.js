@@ -29,6 +29,8 @@ function traceRedemption(stage, upstream) {
   console.warn("opsrental_preview_redeem", {
     stage,
     status: upstream?.status ?? null,
+    centralHandlerReached: upstream?.headers.get("x-myops-preview-redemption") === "central",
+    deploymentProtectionReported: upstream?.headers.get("x-vercel-error") === "DEPLOYMENT_PROTECTION",
     correlation: /^[a-z0-9:.-]{1,160}$/i.test(id) ? id : null,
   });
 }
