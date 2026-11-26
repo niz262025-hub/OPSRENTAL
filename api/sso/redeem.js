@@ -1,6 +1,6 @@
 import { rentalAccessDisabled } from '../rental/authorization.js';
 import { createPrivateKey, randomBytes, createHash, sign, createHmac } from "node:crypto";
-import { myopsBrokerRequest } from './myops-origin.js';
+import { authenticateMyopsPreview, myopsBrokerRequest } from './myops-origin.js';
 import { boundOrganizationEnabled } from './session.js';
 const TICKET = /^[A-Za-z0-9_-]{43}$/;
 function canonicalJson(value) {
@@ -67,7 +67,7 @@ export default async function handler(req, res) {
     const timeout = setTimeout(() => controller.abort(), 8000);
     let upstream;
     try {
-      const request = myopsBrokerRequest("/api/app/redeem", signed.headers);
+      const request = await authenticateMyopsPreview(myopsBrokerRequest("/api/app/redeem", signed.headers));
       upstream = await fetch(request.url, {
         method: "POST", headers: request.headers, body: JSON.stringify(signed.body), redirect: "manual", signal: controller.signal
       });

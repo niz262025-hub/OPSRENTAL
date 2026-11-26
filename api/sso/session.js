@@ -1,6 +1,6 @@
 import { rentalAccessDisabled } from '../rental/authorization.js';
 import { createHmac, timingSafeEqual, createPrivateKey, createHash, randomBytes, sign } from "node:crypto";
-import { myopsBrokerRequest } from './myops-origin.js';
+import { authenticateMyopsPreview, myopsBrokerRequest } from './myops-origin.js';
 const cookieName = "__Host-opsrental-session";
 export function boundOrganizationEnabled() { return process.env.VERCEL_ENV === 'preview' && process.env.MYOPS_RENTAL_ORGANIZATION_BOUND === 'true'; }
 export function parseSession(req) {
@@ -33,9 +33,9 @@ async function entitlementResponse(sid, organizationId, activity = false) {
   const digest = createHash("sha256").update(canonicalJson(body)).digest("hex");
   const message = `POST\n${path}\nopsrental\ncurrent\n${timestamp}\n${nonce}\n${digest}`;
   const signature = sign(null, Buffer.from(message), createPrivateKey(privateKey)).toString("base64url");
-  const request = myopsBrokerRequest(path, { "content-type": "application/json", "x-myops-app-id": "opsrental",
+  const request = await authenticateMyopsPreview(myopsBrokerRequest(path, { "content-type": "application/json", "x-myops-app-id": "opsrental",
       "x-myops-key-version": "current", "x-myops-timestamp": timestamp,
-      "x-myops-nonce": nonce, "x-myops-signature": signature });
+      "x-myops-nonce": nonce, "x-myops-signature": signature }));
   const response = await fetch(request.url, {
     method: "POST", headers: request.headers, body: canonicalJson(body),
     redirect: request.redirect, signal: AbortSignal.timeout(8000)
