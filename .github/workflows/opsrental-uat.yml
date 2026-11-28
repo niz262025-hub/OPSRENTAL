@@ -4,6 +4,7 @@ on:
     branches:
       - fix/opsrental-production-readiness-20261118
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,3 +21,74 @@ jobs:
       - run: npm run check
       - run: node --check rental-api.js
       - run: npm test
+  private-storage-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      SUPABASE_EXPERIMENTAL_STACK: '1'
+      SUPABASE_TELEMETRY_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Start disposable local Supabase and run storage UAT
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD || true
+          export SUPABASE_HOME="$RUNNER_TEMP/supabase-home"
+          test_dir="$RUNNER_TEMP/opsrental-storage-uat"
+          mkdir -p "$test_dir"
+          npm install --prefix "$test_dir" --no-save supabase@3.2.0 >/dev/null
+          cli="$test_dir/node_modules/.bin/supabase"
+          cd "$test_dir"
+          "$cli" init >/dev/null
+          cleanup() { "$cli" stop >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          "$cli" start --runtime native --preparation on-demand --exclude realtime,functions,studio,mail,analytics,pooler > "$RUNNER_TEMP/supabase-start.log" 2>&1 || { echo 'Local Supabase failed to start; inspect runner service connectivity.'; exit 1; }
+          "$cli" status --env --output-format text > "$RUNNER_TEMP/supabase-local.env"
+          set -a
+          source "$RUNNER_TEMP/supabase-local.env"
+          set +a
+          case "${API_URL:-}" in http://127.0.0.1:*|http://localhost:*) ;; *) echo 'Refusing non-loopback API'; exit 1;; esac
+          test -n "${SERVICE_ROLE_KEY:-}"
+          node -e 'const u=new URL(process.env.DB_URL); if (!["localhost","127.0.0.1"].includes(u.hostname)) process.exit(1)'
+          psql "$DB_URL" -v ON_ERROR_STOP=1 --file "$GITHUB_WORKSPACE/tests/storage-uat/fixture.sql" >/dev/null
+          cd "$GITHUB_WORKSPACE"
+          node --test tests/storage-uat/real-storage.test.mjs
+
+  hosted-preview-probe:
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+      github.event.label.name == 'staging-preview-probe-approved.' &&
+      github.actor == github.repository_owner && github.event.pull_request.number == 5 &&
+      github.event.pull_request.head.repo.id == github.event.repository.id &&
+      github.event.pull_request.head.ref == 'fix/rental-central-return-navigation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 23
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --package-lock=false --ignore-scripts playwright@1.58.2
+      - run: npx playwright install --with-deps chromium
+      - name: Capture Preview responses and launch approved staging fixtures
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          OPSRENTAL_UAT_ORG_A_EMAIL: ${{ secrets.OPSRENTAL_UAT_ORG_A_EMAIL }}
+          OPSRENTAL_UAT_ORG_A_PASSWORD: ${{ secrets.OPSRENTAL_UAT_ORG_A_PASSWORD }}
+          OPSRENTAL_UAT_ORG_B_EMAIL: ${{ secrets.OPSRENTAL_UAT_ORG_B_EMAIL }}
+          OPSRENTAL_UAT_ORG_B_PASSWORD: ${{ secrets.OPSRENTAL_UAT_ORG_B_PASSWORD }}
+          OPSRENTAL_UAT_CENTRAL_PREVIEW_SECRET: ${{ secrets.OPSRENTAL_UAT_CENTRAL_PREVIEW_SECRET }}
+          OPSRENTAL_UAT_NATURAL_IDLE: 'true'
+        run: node tests/hosted-preview-probe.mjs

@@ -7,6 +7,7 @@
     <title>OpsRental — MYOPS Rental Management</title>
     <link rel="stylesheet" href="styles.css">
     <script src="access-gate.js" defer></script>
+    <script src="rental-documents.js" defer></script>
   </head>
   <body>
     <div id="access-gate" role="status" style="position:fixed;inset:0;z-index:99999;background:#f5f7f5;display:grid;place-items:center;padding:24px;text-align:center;font:16px system-ui">Verifying MYOPS access…</div>
@@ -32,11 +33,12 @@
     </aside>
 
     <main class="main-content">
-      <div role="status" style="padding:12px 18px;background:#fff3d6;color:#624500;border-bottom:1px solid #e7cf8c;font-weight:600">Development preview only — records are stored in this browser, not synced to MYOPS. Do not enter real tenant, contract or payment information.</div>
+      <div role="status" style="padding:12px 18px;background:#fff3d6;color:#624500;border-bottom:1px solid #e7cf8c;font-weight:600">Development preview only. Do not enter real tenant, contract or payment information.</div>
       <header class="topbar">
         <div class="mobile-brand"><span class="brand-mark">H</span> OpsRental</div>
         <div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb-current">Overview</strong></div>
         <div class="topbar-right">
+          <a href="/api/sso/return">Back to MYOPS</a>
           <span class="today" id="today-label"></span>
           <button class="icon-button" id="notifications-button" type="button" aria-label="View notifications">♧<i></i></button>
         </div>
@@ -70,7 +72,7 @@
       <section class="view" id="properties-view">
         <div class="page-heading"><div><p class="eyebrow">YOUR PORTFOLIO</p><h1>Properties</h1><p class="subheading">Manage the homes in your rental portfolio.</p></div><button class="button button-primary" type="button" data-open-dialog="property-dialog">＋ Add property</button></div>
         <div class="section-summary" id="properties-summary"></div>
-        <div class="table-card"><table><thead><tr><th>PROPERTY</th><th>ADDRESS</th><th>UNITS</th><th>OCCUPANCY</th><th>MONTHLY RENT</th></tr></thead><tbody id="properties-table"></tbody></table><div class="empty-state hidden" id="properties-empty">No properties yet. Add your first property to get started.</div></div>
+        <div class="table-card"><table><thead><tr><th>PROPERTY</th><th>ADDRESS</th><th>UNITS</th><th>OCCUPANCY</th><th>MONTHLY RENT</th><th>ACTIONS</th></tr></thead><tbody id="properties-table"></tbody></table><div class="empty-state hidden" id="properties-empty">No properties yet. Add your first property to get started.</div></div>
       </section>
 
       <section class="view" id="tenancies-view">
