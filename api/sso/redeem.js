@@ -40,21 +40,29 @@ export default async function handler(req, res) {
     traceRedemption("access_disabled");
     return res.status(503).json({error:"Rental access temporarily disabled"});
   }
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST") {
+    traceRedemption("method_denied");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
   const origin = req.headers.origin;
   const host = req.headers.host;
   if (origin) {
     try {
       const parsedOrigin = new URL(origin);
       if (!["https:", "http:"].includes(parsedOrigin.protocol) || parsedOrigin.host !== host || parsedOrigin.username || parsedOrigin.password) {
+        traceRedemption("origin_denied");
         return res.status(403).json({ error: "Origin denied" });
       }
     } catch {
+      traceRedemption("origin_denied");
       return res.status(403).json({ error: "Origin denied" });
     }
   }
   const ticket = req.body?.ticket;
-  if (typeof ticket !== "string" || !TICKET.test(ticket) || Object.keys(req.body || {}).length !== 1) return res.status(400).json({ error: "Invalid ticket" });
+  if (typeof ticket !== "string" || !TICKET.test(ticket) || Object.keys(req.body || {}).length !== 1) {
+    traceRedemption("ticket_format_denied");
+    return res.status(400).json({ error: "Invalid ticket" });
+  }
   if (!process.env.MYOPS_APP_PRIVATE_KEY) {
     traceRedemption("signing_unconfigured");
     return res.status(503).json({ error: "SSO signing not configured" });
