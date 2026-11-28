@@ -71,15 +71,12 @@ export default async function handler(req, res) {
   try {
     const signed = signedRequest(ticket, process.env.MYOPS_APP_PRIVATE_KEY);
     stage = "broker_transport_failed";
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    let upstream;
-    try {
-      const request = await authenticateMyopsPreview(myopsBrokerRequest("/api/app/redeem", signed.headers));
-      upstream = await fetch(request.url, {
-        method: "POST", headers: request.headers, body: JSON.stringify(signed.body), redirect: "manual", signal: controller.signal
-      });
-    } finally { clearTimeout(timeout); }
+    const request = await authenticateMyopsPreview(myopsBrokerRequest("/api/app/redeem", signed.headers));
+    const upstream = await fetch(request.url, {
+      method: "POST", headers: request.headers, body: JSON.stringify(signed.body),
+      redirect: "manual", cache: "no-store",
+      signal: AbortSignal.timeout(process.env.VERCEL_ENV === "preview" ? 15000 : 8000)
+    });
     if (!upstream.ok) {
       traceRedemption(upstream.status >= 300 && upstream.status < 400 ? "broker_redirect" : "broker_rejected", upstream);
       return res.status(upstream.status === 401 || upstream.status === 403 ? upstream.status : 503).json({ error: "MYOPS ticket rejected or unavailable" });
